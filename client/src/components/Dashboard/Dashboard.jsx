@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { formsService } from '../../services/forms';
-import { FileText, Clock, CheckCircle, XCircle, Plus, Eye, Edit } from 'lucide-react';
+import { FileText, Clock, CheckCircle, XCircle, Plus, Settings } from 'lucide-react';
 
 const StatsCard = ({ icon: Icon, label, value, color }) => (
   <div className="card">
@@ -104,14 +104,25 @@ const Dashboard = () => {
             Welcome back, {user.name}!
           </p>
         </div>
-        {(user.role === 'ministry_leader' || user.role === 'admin') && (
-          <button
-            onClick={() => navigate('/forms/new')}
-            className="btn btn-primary"
-          >
-            <Plus size={20} /> New Form
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {(user.role === 'ministry_leader' || user.role === 'admin') && (
+            <button
+              onClick={() => navigate('/forms/create')}
+              className="btn btn-primary flex items-center gap-2"
+            >
+              <Plus size={20} /> New Form
+            </button>
+          )}
+          {user.role === 'admin' && (
+            <button
+              onClick={() => navigate('/admin')}
+              className="px-4 py-2 text-gray-600 hover:text-gray-900 rounded-lg hover:bg-gray-100 font-medium flex items-center gap-2"
+            >
+              <Settings size={20} />
+              <span>Admin</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Stats Cards */}
@@ -152,12 +163,12 @@ const Dashboard = () => {
             <p className="text-gray-600 mb-4">No forms found</p>
             {(user.role === 'ministry_leader' || user.role === 'admin') && (
               <button
-              onClick={() => navigate('/forms/create')}
-              className="px-6 py-3 bg-church-primary text-white rounded-lg hover:bg-church-secondary font-medium flex items-center space-x-2"
-            >
-              <Plus className="w-5 h-5" />
-              <span>Create New Form</span>
-            </button>
+                onClick={() => navigate('/forms/create')}
+                className="px-6 py-3 bg-church-primary text-white rounded-lg hover:bg-church-secondary font-medium flex items-center space-x-2 mx-auto"
+              >
+                <Plus className="w-5 h-5" />
+                <span>Create New Form</span>
+              </button>
             )}
           </div>
         ) : (
@@ -209,25 +220,25 @@ const Dashboard = () => {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <button
-                           onClick={() => navigate(`/forms/${form.id}/view`)}
-                           className="text-gray-600 hover:text-gray-800"
-                         >
-                           View
+                          onClick={() => navigate(`/forms/${form.id}/view`)}
+                          className="text-gray-600 hover:text-gray-800"
+                        >
+                          View
                         </button>
                         {canEdit(form) && (
                           <button
-                          onClick={() => navigate(`/forms/${form.id}/edit`)}
-                          className="text-blue-600 hover:text-blue-800"
-                        >
-                          Edit
+                            onClick={() => navigate(`/forms/${form.id}/edit`)}
+                            className="text-blue-600 hover:text-blue-800"
+                          >
+                            Edit
                           </button>
                         )}
                         {needsMyApproval(form) && (
                           <button
-                          onClick={() => navigate(`/forms/${form.id}/approve`)}
-                          className="text-green-600 hover:text-green-800"
-                        >
-                          Review
+                            onClick={() => navigate(`/forms/${form.id}/approve`)}
+                            className="text-green-600 hover:text-green-800"
+                          >
+                            Review
                           </button>
                         )}
                       </div>

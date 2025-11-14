@@ -152,11 +152,12 @@ const Dashboard = () => {
             <p className="text-gray-600 mb-4">No forms found</p>
             {(user.role === 'ministry_leader' || user.role === 'admin') && (
               <button
-                onClick={() => navigate('/forms/new')}
-                className="btn btn-primary"
-              >
-                Create Your First Form
-              </button>
+              onClick={() => navigate('/forms/create')}
+              className="px-6 py-3 bg-church-primary text-white rounded-lg hover:bg-church-secondary font-medium flex items-center space-x-2"
+            >
+              <Plus className="w-5 h-5" />
+              <span>Create New Form</span>
+            </button>
             )}
           </div>
         ) : (
@@ -208,25 +209,25 @@ const Dashboard = () => {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={() => navigate(`/forms/${form.id}`)}
-                          className="btn btn-secondary btn-sm px-3 py-1 text-xs"
-                        >
-                          <Eye size={14} /> View
+                           onClick={() => navigate(`/forms/${form.id}/view`)}
+                           className="text-gray-600 hover:text-gray-800"
+                         >
+                           View
                         </button>
                         {canEdit(form) && (
                           <button
-                            onClick={() => navigate(`/forms/${form.id}/edit`)}
-                            className="btn btn-primary btn-sm px-3 py-1 text-xs"
-                          >
-                            <Edit size={14} /> Edit
+                          onClick={() => navigate(`/forms/${form.id}/edit`)}
+                          className="text-blue-600 hover:text-blue-800"
+                        >
+                          Edit
                           </button>
                         )}
                         {needsMyApproval(form) && (
                           <button
-                            onClick={() => navigate(`/forms/${form.id}/approve`)}
-                            className="btn btn-success btn-sm px-3 py-1 text-xs"
-                          >
-                            <CheckCircle size={14} /> Review
+                          onClick={() => navigate(`/forms/${form.id}/approve`)}
+                          className="text-green-600 hover:text-green-800"
+                        >
+                          Review
                           </button>
                         )}
                       </div>

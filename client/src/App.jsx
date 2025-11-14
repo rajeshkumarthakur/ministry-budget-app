@@ -1,29 +1,26 @@
-// src/App.jsx - UPDATED FOR PHASE 3.2
+// src/App.jsx - UPDATED FOR PHASE 3.3
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Login from './components/Auth/Login';
 import Dashboard from './components/Dashboard/Dashboard';
-import FormView from './components/Forms/FormView';
-import FormCreate from './components/Forms/FormCreate';
-// Phase 3.2 components - uncomment when files are created
-// import FormBuilder from './components/Forms/FormBuilder';
-// import FormApproval from './components/Forms/FormApproval';
 
-// Root route component that redirects based on auth status
+// Phase 3.2 - Form Components
+import FormCreate from './components/Forms/FormCreate';
+import FormBuilder from './components/Forms/FormBuilder';
+import FormView from './components/Forms/FormView';
+import FormApproval from './components/Forms/FormApproval';
+
+// Phase 3.3 - Admin Components
+import AdminDashboard from './components/Admin/AdminDashboard';
+import AdminMinistries from './components/Admin/AdminMinistries';
+import AdminEventTypes from './components/Admin/AdminEventTypes';
+import AdminUsers from './components/Admin/AdminUsers';
+
+// Root route component - always redirect to login first
 const RootRoute = () => {
-  const { user, loading } = useAuth();
-  
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-church-green"></div>
-      </div>
-    );
-  }
-  
-  return user ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />;
+  return <Navigate to="/login" replace />;
 };
 
 function App() {
@@ -55,10 +52,10 @@ function App() {
           />
           
           <Route
-            path="/forms/new"
+            path="/forms/:id/edit"
             element={
               <ProtectedRoute allowedRoles={['ministry_leader', 'admin']}>
-                <FormCreate />
+                <FormBuilder />
               </ProtectedRoute>
             }
           />
@@ -72,16 +69,6 @@ function App() {
             }
           />
           
-          {/* Other form routes - uncomment when components are created */}
-          {/* <Route
-            path="/forms/:id/edit"
-            element={
-              <ProtectedRoute allowedRoles={['ministry_leader', 'admin']}>
-                <FormBuilder />
-              </ProtectedRoute>
-            }
-          />
-          
           <Route
             path="/forms/:id/approve"
             element={
@@ -89,17 +76,44 @@ function App() {
                 <FormApproval />
               </ProtectedRoute>
             }
-          /> */}
+          />
 
-          {/* Admin Routes - Coming in Phase 3.3 */}
-          {/* <Route
+          {/* Admin Routes - Phase 3.3 */}
+          <Route
             path="/admin"
             element={
               <ProtectedRoute allowedRoles={['admin']}>
                 <AdminDashboard />
               </ProtectedRoute>
             }
-          /> */}
+          />
+          
+          <Route
+            path="/admin/ministries"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <AdminMinistries />
+              </ProtectedRoute>
+            }
+          />
+          
+          <Route
+            path="/admin/event-types"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <AdminEventTypes />
+              </ProtectedRoute>
+            }
+          />
+          
+          <Route
+            path="/admin/users"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <AdminUsers />
+              </ProtectedRoute>
+            }
+          />
 
           {/* Default Route - redirects based on auth status */}
           <Route path="/" element={<RootRoute />} />

@@ -18,6 +18,11 @@ export const formsService = {
     return response.data;
   },
 
+  async updateForm(id, data) {
+    const response = await api.put(`/forms/${id}`, data);
+    return response.data;
+  },
+
   async updateFormSection(id, section, data) {
     const response = await api.put(`/forms/${id}`, { section, data });
     return response.data;
