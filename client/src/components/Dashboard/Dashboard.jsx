@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { formsService } from '../../services/forms';
+import Header from '../Common/Header';
 import { FileText, Clock, CheckCircle, XCircle, Plus, Settings } from 'lucide-react';
 
 const StatsCard = ({ icon: Icon, label, value, color }) => (
@@ -93,9 +94,11 @@ const Dashboard = () => {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="min-h-screen bg-gray-50">
+      <Header />
+      <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">
             Ministry Budget & Plan Dashboard
@@ -105,6 +108,7 @@ const Dashboard = () => {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          {/* Only show "New Form" button for ministry_leader and admin roles */}
           {(user.role === 'ministry_leader' || user.role === 'admin') && (
             <button
               onClick={() => navigate('/forms/create')}
@@ -116,7 +120,7 @@ const Dashboard = () => {
           {user.role === 'admin' && (
             <button
               onClick={() => navigate('/admin')}
-              className="px-4 py-2 text-gray-600 hover:text-gray-900 rounded-lg hover:bg-gray-100 font-medium flex items-center gap-2"
+              className="px-4 py-2 bg-gray-100 text-gray-800 hover:text-gray-900 rounded-lg hover:bg-gray-200 font-medium flex items-center gap-2 transition-colors"
             >
               <Settings size={20} />
               <span>Admin</span>
@@ -161,6 +165,7 @@ const Dashboard = () => {
           <div className="text-center py-12">
             <FileText size={48} className="text-gray-300 mx-auto mb-4" />
             <p className="text-gray-600 mb-4">No forms found</p>
+            {/* Only show "Create New Form" button for ministry_leader and admin roles - hidden for pillar and pastor */}
             {(user.role === 'ministry_leader' || user.role === 'admin') && (
               <button
                 onClick={() => navigate('/forms/create')}
@@ -249,6 +254,7 @@ const Dashboard = () => {
             </table>
           </div>
         )}
+      </div>
       </div>
     </div>
   );

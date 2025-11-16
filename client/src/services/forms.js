@@ -58,6 +58,11 @@ export const formsService = {
     return response.data;
   },
 
+  async createEvent(formId, eventData) {
+    // Alias for addEvent for consistency
+    return this.addEvent(formId, eventData);
+  },
+
   async updateEvent(formId, eventId, eventData) {
     const response = await api.put(`/forms/${formId}/events/${eventId}`, eventData);
     return response.data;
@@ -77,6 +82,11 @@ export const formsService = {
   async addGoal(formId, goalData) {
     const response = await api.post(`/forms/${formId}/goals`, goalData);
     return response.data;
+  },
+
+  async createGoal(formId, goalData) {
+    // Alias for addGoal for consistency
+    return this.addGoal(formId, goalData);
   },
 
   async updateGoal(formId, goalId, goalData) {

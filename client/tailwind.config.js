@@ -21,6 +21,8 @@ export default {
         },
         'church-green': '#6AB547',
         'church-lightgreen': '#8BC34A',
+        'church-primary': '#6AB547', // Same as church-green
+        'church-secondary': '#5a9a3d', // Darker shade for hover states
       },
     },
   },

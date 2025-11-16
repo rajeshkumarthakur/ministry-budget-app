@@ -10,7 +10,6 @@ const rateLimit = require('express-rate-limit');
 const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
 const path = require('path');
-
 // Initialize Express app
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -245,17 +244,20 @@ const eventsModule = require('./routes/events');
 const goalsModule = require('./routes/goals');
 const adminModule = require('./routes/admin');
 const lovModule = require('./routes/lov');
+const exportRoutes = require('./routes/export-routes');
 
 formsModule.initializeRouter(pool);
 eventsModule.initializeRouter(pool);
 goalsModule.initializeRouter(pool);
 adminModule.initializeRouter(pool);
 lovModule.initializeRouter(pool);
+exportRoutes.initializeRouter(pool);
 
 // Mount routes
 app.use('/api/forms', authenticateToken, formsModule.router);
 app.use('/api/forms', authenticateToken, eventsModule.router);
 app.use('/api/forms', authenticateToken, goalsModule.router);
+app.use('/api/forms', authenticateToken, exportRoutes.router);
 app.use('/api/admin', authenticateToken, authorizeRole('admin'), adminModule.router);
 app.use('/api/lov', authenticateToken, lovModule.router);
 

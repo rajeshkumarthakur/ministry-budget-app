@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { adminService } from '../../services/admin';
+import Header from '../Common/Header';
 import { Plus, Edit2, Trash2, Calendar, ArrowLeft, Search, AlertCircle } from 'lucide-react';
 
 const AdminEventTypes = () => {
@@ -101,8 +102,9 @@ const AdminEventTypes = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-7xl mx-auto px-4">
+    <div className="min-h-screen bg-gray-50">
+      <Header />
+      <div className="max-w-7xl mx-auto px-4 py-8">
         {/* Header */}
         <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
           <button

@@ -2,11 +2,15 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { formsService } from '../../services/forms';
+import { useAuth } from '../../context/AuthContext';
+import Header from '../Common/Header';
 import { AlertCircle, Calendar, DollarSign, Users, Target, ArrowLeft, FileText, CheckCircle, Clock } from 'lucide-react';
+import FormExport from './FormExport';
 
 const FormView = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { logout } = useAuth();
   const [form, setForm] = useState(null);
   const [events, setEvents] = useState([]);
   const [goals, setGoals] = useState([]);
@@ -30,7 +34,12 @@ const FormView = () => {
       setGoals(goalsData);
     } catch (error) {
       console.error('Error loading form:', error);
-      setError('Failed to load form');
+      if (error.response?.status === 401) {
+        // Token expired - logout and let ProtectedRoute redirect to login
+        logout();
+      } else {
+        setError('Failed to load form');
+      }
     } finally {
       setLoading(false);
     }
@@ -94,8 +103,9 @@ const FormView = () => {
   const sections = form.sections || {};
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-5xl mx-auto px-4">
+    <div className="min-h-screen bg-gray-50">
+      <Header />
+      <div className="max-w-5xl mx-auto px-4 py-8">
         {/* Header */}
         <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
           <button
@@ -124,6 +134,13 @@ const FormView = () => {
             </p>
           )}
         </div>
+        {/* Export Section */}
+          <FormExport 
+            formId={id}
+            formNumber={form.form_number}
+            ministryName={form.ministry_name}
+            status={form.status}
+          />
 
         {/* Budget Summary */}
         <div className="bg-gradient-to-r from-church-primary to-church-secondary rounded-lg p-6 text-white mb-6">

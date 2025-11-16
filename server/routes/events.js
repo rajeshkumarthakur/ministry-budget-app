@@ -36,10 +36,54 @@ router.get('/:formId/events', async (req, res) => {
       return res.status(403).json({ error: 'You can only view events for your own forms' });
     }
 
-    const result = await pool.query(
-      'SELECT * FROM events WHERE form_id = $1 ORDER BY event_date',
-      [formId]
-    );
+    // Try to select with expected_attendance, fallback if column doesn't exist
+    let result;
+    try {
+      result = await pool.query(
+        `SELECT 
+          id,
+          form_id,
+          event_date,
+          event_name,
+          event_type,
+          purpose,
+          description,
+          estimated_expenses,
+          estimated_expenses as budget_amount,
+          expected_attendance,
+          notes,
+          created_at
+         FROM events 
+         WHERE form_id = $1 
+         ORDER BY event_date`,
+        [formId]
+      );
+    } catch (dbError) {
+      // If expected_attendance column doesn't exist, select without it
+      if (dbError.code === '42703' || dbError.message.includes('expected_attendance')) {
+        result = await pool.query(
+          `SELECT 
+            id,
+            form_id,
+            event_date,
+            event_name,
+            event_type,
+            purpose,
+            description,
+            estimated_expenses,
+            estimated_expenses as budget_amount,
+            NULL as expected_attendance,
+            notes,
+            created_at
+           FROM events 
+           WHERE form_id = $1 
+           ORDER BY event_date`,
+          [formId]
+        );
+      } else {
+        throw dbError;
+      }
+    }
 
     res.json(result.rows);
 
@@ -56,7 +100,17 @@ router.post('/:formId/events', async (req, res) => {
   try {
     const formId = parseInt(req.params.formId);
     const { id: userId, role } = req.user;
-    const { event_date, event_name, event_type, purpose, description, estimated_expenses, notes } = req.body;
+    const { 
+      event_date, 
+      event_name, 
+      event_type, 
+      purpose, 
+      description, 
+      estimated_expenses, 
+      budget_amount,  // Support both field names
+      expected_attendance,
+      notes 
+    } = req.body;
 
     // Check if user can edit this form
     const editCheck = await canEditForm(pool, userId, role, formId);
@@ -64,12 +118,80 @@ router.post('/:formId/events', async (req, res) => {
       return res.status(403).json({ error: editCheck.reason });
     }
 
-    const result = await pool.query(
-      `INSERT INTO events (form_id, event_date, event_name, event_type, purpose, description, estimated_expenses, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING *`,
-      [formId, event_date || null, event_name || null, event_type || null, purpose || null, description || null, estimated_expenses || 0, notes || null]
-    );
+    // Use budget_amount if provided, otherwise use estimated_expenses
+    const budgetValue = budget_amount !== undefined ? parseFloat(budget_amount) || 0 : (parseFloat(estimated_expenses) || 0);
+    
+    // Convert expected_attendance to integer if provided
+    const attendanceValue = expected_attendance !== undefined && expected_attendance !== null && expected_attendance !== '' 
+      ? parseInt(expected_attendance) 
+      : null;
+
+    // Try to insert with expected_attendance, fallback if column doesn't exist
+    let result;
+    try {
+      result = await pool.query(
+        `INSERT INTO events (form_id, event_date, event_name, event_type, purpose, description, estimated_expenses, expected_attendance, notes)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         RETURNING 
+           id,
+           form_id,
+           event_date,
+           event_name,
+           event_type,
+           purpose,
+           description,
+           estimated_expenses,
+           estimated_expenses as budget_amount,
+           expected_attendance,
+           notes,
+           created_at`,
+        [
+          formId, 
+          event_date || null, 
+          event_name || null, 
+          event_type || null, 
+          purpose || null, 
+          description || null, 
+          budgetValue, 
+          attendanceValue,
+          notes || null
+        ]
+      );
+    } catch (dbError) {
+      // If expected_attendance column doesn't exist, insert without it
+      if (dbError.code === '42703' || dbError.message.includes('expected_attendance')) {
+        console.warn('expected_attendance column not found, inserting without it');
+        result = await pool.query(
+          `INSERT INTO events (form_id, event_date, event_name, event_type, purpose, description, estimated_expenses, notes)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           RETURNING 
+             id,
+             form_id,
+             event_date,
+             event_name,
+             event_type,
+             purpose,
+             description,
+             estimated_expenses,
+             estimated_expenses as budget_amount,
+             NULL as expected_attendance,
+             notes,
+             created_at`,
+          [
+            formId, 
+            event_date || null, 
+            event_name || null, 
+            event_type || null, 
+            purpose || null, 
+            description || null, 
+            budgetValue, 
+            notes || null
+          ]
+        );
+      } else {
+        throw dbError;
+      }
+    }
 
     await pool.query(
       'INSERT INTO audit_log (form_id, user_id, action, details) VALUES ($1, $2, $3, $4)',
@@ -92,7 +214,17 @@ router.put('/:formId/events/:id', async (req, res) => {
     const formId = parseInt(req.params.formId);
     const eventId = parseInt(req.params.id);
     const { id: userId, role } = req.user;
-    const { event_date, event_name, event_type, purpose, description, estimated_expenses, notes } = req.body;
+    const { 
+      event_date, 
+      event_name, 
+      event_type, 
+      purpose, 
+      description, 
+      estimated_expenses, 
+      budget_amount,  // Support both field names
+      expected_attendance,
+      notes 
+    } = req.body;
 
     // Check if user can edit this form
     const editCheck = await canEditForm(pool, userId, role, formId);
@@ -110,14 +242,86 @@ router.put('/:formId/events/:id', async (req, res) => {
       return res.status(404).json({ error: 'Event not found' });
     }
 
-    const result = await pool.query(
-      `UPDATE events 
-       SET event_date = $1, event_name = $2, event_type = $3, purpose = $4, 
-           description = $5, estimated_expenses = $6, notes = $7
-       WHERE id = $8 AND form_id = $9
-       RETURNING *`,
-      [event_date || null, event_name || null, event_type || null, purpose || null, description || null, estimated_expenses || 0, notes || null, eventId, formId]
-    );
+    // Use budget_amount if provided, otherwise use estimated_expenses
+    const budgetValue = budget_amount !== undefined ? parseFloat(budget_amount) || 0 : (parseFloat(estimated_expenses) || 0);
+    
+    // Convert expected_attendance to integer if provided
+    const attendanceValue = expected_attendance !== undefined && expected_attendance !== null && expected_attendance !== '' 
+      ? parseInt(expected_attendance) 
+      : null;
+
+    // Try to update with expected_attendance, fallback if column doesn't exist
+    let result;
+    try {
+      result = await pool.query(
+        `UPDATE events 
+         SET event_date = $1, event_name = $2, event_type = $3, purpose = $4, 
+             description = $5, estimated_expenses = $6, expected_attendance = $7, notes = $8
+         WHERE id = $9 AND form_id = $10
+         RETURNING 
+           id,
+           form_id,
+           event_date,
+           event_name,
+           event_type,
+           purpose,
+           description,
+           estimated_expenses,
+           estimated_expenses as budget_amount,
+           expected_attendance,
+           notes,
+           created_at`,
+        [
+          event_date || null, 
+          event_name || null, 
+          event_type || null, 
+          purpose || null, 
+          description || null, 
+          budgetValue, 
+          attendanceValue,
+          notes || null, 
+          eventId, 
+          formId
+        ]
+      );
+    } catch (dbError) {
+      // If expected_attendance column doesn't exist, update without it
+      if (dbError.code === '42703' || dbError.message.includes('expected_attendance')) {
+        console.warn('expected_attendance column not found, updating without it');
+        result = await pool.query(
+          `UPDATE events 
+           SET event_date = $1, event_name = $2, event_type = $3, purpose = $4, 
+               description = $5, estimated_expenses = $6, notes = $7
+           WHERE id = $8 AND form_id = $9
+           RETURNING 
+             id,
+             form_id,
+             event_date,
+             event_name,
+             event_type,
+             purpose,
+             description,
+             estimated_expenses,
+             estimated_expenses as budget_amount,
+             NULL as expected_attendance,
+             notes,
+             created_at`,
+          [
+            event_date || null, 
+            event_name || null, 
+            event_type || null, 
+            purpose || null, 
+            description || null, 
+            budgetValue, 
+            notes || null, 
+            eventId, 
+            formId
+          ]
+        );
+      } else {
+        throw dbError;
+      }
+    }
 
     await pool.query(
       'INSERT INTO audit_log (form_id, user_id, action, details) VALUES ($1, $2, $3, $4)',

@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { formsService } from '../../services/forms';
+import Header from '../Common/Header';
 import { AlertCircle, CheckCircle, XCircle, ArrowLeft, FileText } from 'lucide-react';
 
 const FormApproval = () => {
@@ -116,8 +117,9 @@ const FormApproval = () => {
   const sections = form.sections || {};
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-5xl mx-auto px-4">
+    <div className="min-h-screen bg-gray-50">
+      <Header />
+      <div className="max-w-5xl mx-auto px-4 py-8">
         {/* Header */}
         <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
           <button

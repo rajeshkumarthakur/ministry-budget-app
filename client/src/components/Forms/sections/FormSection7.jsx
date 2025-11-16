@@ -1,7 +1,7 @@
-// src/components/Forms/sections/FormSection7.jsx
+// src/components/Forms/sections/FormSection7.jsx - UPDATED with Running Totals
 import React, { useState, useEffect } from 'react';
 import { formsService } from '../../../services/forms';
-import { DollarSign, TrendingUp, Calendar } from 'lucide-react';
+import { DollarSign, TrendingUp, Calendar, AlertCircle } from 'lucide-react';
 
 const FormSection7 = ({ formId, data, onChange, formData }) => {
   const [events, setEvents] = useState([]);
@@ -45,9 +45,23 @@ const FormSection7 = ({ formId, data, onChange, formData }) => {
     return getEventsBudget() + getOperatingBudget() + getCapitalExpenses();
   };
 
+  // Calculate running totals for events
+  const getEventsWithRunningTotal = () => {
+    let runningTotal = 0;
+    return events.map(event => {
+      runningTotal += parseFloat(event.budget_amount || 0);
+      return {
+        ...event,
+        runningTotal
+      };
+    });
+  };
+
   if (loading) {
     return <div className="text-center py-8">Loading budget information...</div>;
   }
+
+  const eventsWithRunningTotal = getEventsWithRunningTotal();
 
   return (
     <div className="space-y-6">
@@ -187,24 +201,75 @@ const FormSection7 = ({ formId, data, onChange, formData }) => {
         </div>
       </div>
 
-      {/* Events Budget Breakdown */}
+      {/* Events Budget Breakdown with Running Totals */}
       {events.length > 0 && (
         <div>
-          <h4 className="font-semibold text-gray-900 mb-3">Events Budget Details</h4>
-          <div className="bg-gray-50 rounded-lg p-4">
-            <div className="space-y-2">
-              {events.map((event) => (
-                <div key={event.id} className="flex items-center justify-between text-sm">
-                  <span className="text-gray-700">{event.event_name}</span>
-                  <span className="font-medium text-gray-900">
-                    ${parseFloat(event.budget_amount).toLocaleString()}
-                  </span>
-                </div>
-              ))}
-              <div className="border-t pt-2 flex items-center justify-between font-semibold">
-                <span className="text-gray-900">Total Events:</span>
-                <span className="text-gray-900">${getEventsBudget().toLocaleString()}</span>
-              </div>
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="font-semibold text-gray-900">Events Budget Details</h4>
+            <span className="text-sm text-gray-500">Running totals shown</span>
+          </div>
+          <div className="bg-gray-50 rounded-lg overflow-hidden border border-gray-200">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-100">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Event Name
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Date
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Budget
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <div className="flex items-center justify-end space-x-1">
+                        <TrendingUp className="w-3 h-3" />
+                        <span>Running Total</span>
+                      </div>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {eventsWithRunningTotal.map((event, index) => (
+                    <tr key={event.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm text-gray-900">
+                        {event.event_name}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {new Date(event.event_date).toLocaleDateString()}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-900 text-right font-medium">
+                        ${parseFloat(event.budget_amount).toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-right">
+                        <span className="font-bold text-blue-600">
+                          ${event.runningTotal.toLocaleString()}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                  <tr className="bg-blue-50 font-semibold">
+                    <td colSpan="2" className="px-4 py-3 text-sm text-blue-900">
+                      Total Events Budget:
+                    </td>
+                    <td colSpan="2" className="px-4 py-3 text-sm text-blue-900 text-right">
+                      ${getEventsBudget().toLocaleString()}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          
+          {/* Info box about running totals */}
+          <div className="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <div className="flex items-start space-x-2">
+              <AlertCircle className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-blue-800">
+                <strong>Running Total</strong> shows the cumulative budget as events are added. 
+                This helps track how your event spending builds throughout the year.
+              </p>
             </div>
           </div>
         </div>

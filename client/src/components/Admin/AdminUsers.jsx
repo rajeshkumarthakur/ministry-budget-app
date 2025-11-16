@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { adminService } from '../../services/admin';
+import Header from '../Common/Header';
 import { 
   Plus, Edit2, Trash2, User, Key, Shield, ArrowLeft, 
   Search, AlertCircle, Eye, EyeOff 
@@ -188,8 +189,9 @@ const AdminUsers = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-7xl mx-auto px-4">
+    <div className="min-h-screen bg-gray-50">
+      <Header />
+      <div className="max-w-7xl mx-auto px-4 py-8">
         {/* Header */}
         <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
           <button
@@ -379,8 +381,8 @@ const AdminUsers = () => {
         {/* User Modal */}
         {showModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-              <div className="p-6">
+            <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] flex flex-col">
+              <div className="p-6 overflow-y-auto flex-1">
                 <h3 className="text-xl font-bold text-gray-900 mb-6">
                   {editingUser ? 'Edit User' : 'Add New User'}
                 </h3>
@@ -395,7 +397,7 @@ const AdminUsers = () => {
                   </div>
                 )}
 
-                <form onSubmit={handleSubmit} className="space-y-4">
+                <form id="user-form" onSubmit={handleSubmit} className="space-y-4 flex flex-col h-full">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Full Name <span className="text-red-500">*</span>
@@ -482,20 +484,21 @@ const AdminUsers = () => {
                     </label>
                   </div>
 
-                  <div className="flex items-center justify-end space-x-3 pt-4 border-t">
+                  {/* Fixed footer with buttons */}
+                  <div className="flex items-center justify-end space-x-3 pt-6 mt-6 border-t border-gray-200">
                     <button
                       type="button"
                       onClick={() => {
                         setShowModal(false);
                         setError('');
                       }}
-                      className="px-4 py-2 text-gray-700 hover:text-gray-900 font-medium"
+                      className="px-6 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium transition-colors"
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
-                      className="px-6 py-2 bg-church-primary text-white rounded-lg hover:bg-church-secondary font-medium"
+                      className="px-6 py-2 bg-church-primary text-white rounded-lg hover:bg-church-secondary font-medium transition-colors"
                     >
                       {editingUser ? 'Update User' : 'Add User'}
                     </button>
@@ -509,8 +512,8 @@ const AdminUsers = () => {
         {/* PIN Change Modal */}
         {showPinModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-lg max-w-md w-full">
-              <div className="p-6">
+            <div className="bg-white rounded-lg max-w-md w-full flex flex-col">
+              <div className="p-6 flex-1">
                 <h3 className="text-xl font-bold text-gray-900 mb-6">
                   Change PIN for {editingUser?.full_name}
                 </h3>
@@ -525,7 +528,7 @@ const AdminUsers = () => {
                   </div>
                 )}
 
-                <form onSubmit={handlePINSubmit} className="space-y-4">
+                <form id="pin-form" onSubmit={handlePINSubmit} className="space-y-4 flex flex-col">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       New 4-Digit PIN <span className="text-red-500">*</span>
@@ -555,21 +558,21 @@ const AdminUsers = () => {
                       required
                     />
                   </div>
-
-                  <div className="flex items-center justify-end space-x-3 pt-4 border-t">
+                  {/* Fixed footer with buttons */}
+                  <div className="flex items-center justify-end space-x-3 pt-6 mt-6 border-t border-gray-200">
                     <button
                       type="button"
                       onClick={() => {
                         setShowPinModal(false);
                         setError('');
                       }}
-                      className="px-4 py-2 text-gray-700 hover:text-gray-900 font-medium"
+                      className="px-6 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium transition-colors"
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
-                      className="px-6 py-2 bg-church-primary text-white rounded-lg hover:bg-church-secondary font-medium"
+                      className="px-6 py-2 bg-church-primary text-white rounded-lg hover:bg-church-secondary font-medium transition-colors"
                     >
                       Update PIN
                     </button>

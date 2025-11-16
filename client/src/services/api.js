@@ -27,15 +27,17 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Token expired or invalid - but don't redirect if we're already on login page
-      // Let React Router handle navigation
+      // Token expired or invalid
+      // Don't clear localStorage here - let components handle 401 errors
+      // Components can check error.response?.status === 401 and call logout from AuthContext
+      // This prevents race conditions where localStorage is cleared but AuthContext still has user
       const currentPath = window.location.pathname;
-      if (currentPath !== '/login') {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        // Use React Router navigation instead of hard redirect
-        window.location.href = '/login';
+      if (currentPath === '/login' || currentPath === '/') {
+        // Already on login page, just reject the error
+        return Promise.reject(error);
       }
+      // For other pages, let the component handle the 401 error
+      // ProtectedRoute will check AuthContext, not localStorage directly
     }
     return Promise.reject(error);
   }

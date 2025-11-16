@@ -11,6 +11,100 @@ const initializeRouter = (dbPool) => {
 };
 
 // ============================================
+// ADMIN STATISTICS
+// ============================================
+
+// GET /api/admin/stats - Get system statistics
+router.get('/stats', async (req, res) => {
+  try {
+    // Get total forms
+    const formsResult = await pool.query('SELECT COUNT(*) as count FROM ministry_forms');
+    const totalForms = parseInt(formsResult.rows[0].count);
+
+    // Get pending forms
+    const pendingResult = await pool.query(
+      "SELECT COUNT(*) as count FROM ministry_forms WHERE status IN ('pending_pillar', 'pending_pastor')"
+    );
+    const pendingForms = parseInt(pendingResult.rows[0].count);
+
+    // Get approved forms
+    const approvedResult = await pool.query(
+      "SELECT COUNT(*) as count FROM ministry_forms WHERE status = 'approved'"
+    );
+    const approvedForms = parseInt(approvedResult.rows[0].count);
+
+    // Get total budget (sum from section7 total_budget)
+    const budgetResult = await pool.query(`
+      SELECT 
+        COALESCE(SUM((sections->'section7'->>'total_budget')::numeric), 0) as total
+      FROM ministry_forms
+      WHERE status = 'approved'
+        AND sections->'section7'->>'total_budget' IS NOT NULL
+    `);
+    const totalBudget = parseFloat(budgetResult.rows[0].total || 0);
+
+    // Get total users
+    const usersResult = await pool.query('SELECT COUNT(*) as count FROM users');
+    const totalUsers = parseInt(usersResult.rows[0].count);
+
+    // Get total ministries
+    const ministriesResult = await pool.query('SELECT COUNT(*) as count FROM ministries');
+    const totalMinistries = parseInt(ministriesResult.rows[0].count);
+
+    // Get active ministries
+    const activeMinistriesResult = await pool.query(
+      'SELECT COUNT(*) as count FROM ministries WHERE active = true'
+    );
+    const activeMinistries = parseInt(activeMinistriesResult.rows[0].count);
+
+    // Get total event types
+    const eventTypesResult = await pool.query('SELECT COUNT(*) as count FROM event_types');
+    const totalEventTypes = parseInt(eventTypesResult.rows[0].count);
+
+    // Get active users
+    const activeUsersResult = await pool.query(
+      'SELECT COUNT(*) as count FROM users WHERE active = true'
+    );
+    const activeUsers = parseInt(activeUsersResult.rows[0].count);
+
+    // Get recent activity from audit log
+    const activityResult = await pool.query(`
+      SELECT 
+        al.details as description,
+        u.name as user,
+        al.created_at,
+        CASE 
+          WHEN al.action LIKE '%approve%' THEN 'approval'
+          WHEN al.action LIKE '%submit%' THEN 'submission'
+          WHEN al.action LIKE '%reject%' THEN 'rejection'
+          ELSE 'other'
+        END as type
+      FROM audit_log al
+      LEFT JOIN users u ON al.user_id = u.id
+      WHERE al.action IN ('form_submit', 'form_approve', 'form_reject')
+      ORDER BY al.created_at DESC
+      LIMIT 10
+    `);
+
+    res.json({
+      totalForms,
+      pendingForms,
+      approvedForms,
+      totalBudget,
+      totalUsers,
+      totalMinistries,
+      activeMinistries,
+      totalEventTypes,
+      activeUsers,
+      recentActivity: activityResult.rows
+    });
+  } catch (error) {
+    console.error('Error getting admin stats:', error);
+    res.status(500).json({ error: 'Server error fetching statistics' });
+  }
+});
+
+// ============================================
 // MINISTRIES MANAGEMENT
 // ============================================
 
@@ -320,12 +414,215 @@ router.delete('/event-types/:id', async (req, res) => {
 });
 
 // ============================================
+// USER MANAGEMENT
+// ============================================
+
+// GET /api/admin/users - List all users
+router.get('/users', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, name as full_name, email, 
+              CASE WHEN role = 'ministry_leader' THEN 'ministry' ELSE role END as role, 
+              active, created_at 
+       FROM users 
+       ORDER BY name`
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Get users error:', error);
+    res.status(500).json({ error: 'Server error fetching users' });
+  }
+});
+
+// POST /api/admin/users - Create new user
+router.post('/users', async (req, res) => {
+  try {
+    const { full_name, email, role, pin, active } = req.body;
+
+    if (!full_name || !email || !role || !pin) {
+      return res.status(400).json({ error: 'Full name, email, role, and PIN are required' });
+    }
+
+    if (pin.length !== 4 || !/^\d{4}$/.test(pin)) {
+      return res.status(400).json({ error: 'PIN must be exactly 4 digits' });
+    }
+
+    // Map frontend role 'ministry' to database role 'ministry_leader'
+    const dbRole = role === 'ministry' ? 'ministry_leader' : role;
+
+    // Check for duplicate email
+    const existing = await pool.query(
+      'SELECT id FROM users WHERE LOWER(email) = LOWER($1)',
+      [email]
+    );
+
+    if (existing.rows.length > 0) {
+      return res.status(400).json({ error: 'A user with this email already exists' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO users (name, email, role, pin, active)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, name as full_name, email, CASE WHEN role = 'ministry_leader' THEN 'ministry' ELSE role END as role, active, created_at`,
+      [full_name.trim(), email.toLowerCase().trim(), dbRole, pin, active !== false]
+    );
+
+    // Log audit
+    await pool.query(
+      'INSERT INTO audit_log (user_id, action, details) VALUES ($1, $2, $3)',
+      [req.user.id, 'user_created', `Created user: ${email}`]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'Email already exists' });
+    }
+    console.error('Create user error:', error);
+    res.status(500).json({ error: 'Server error creating user' });
+  }
+});
+
+// PUT /api/admin/users/:id - Update user
+router.put('/users/:id', async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id);
+    const { full_name, email, role, pin, active } = req.body;
+
+    if (!full_name || !email || !role) {
+      return res.status(400).json({ error: 'Full name, email, and role are required' });
+    }
+
+    // Check for duplicate email (excluding current user)
+    const existing = await pool.query(
+      'SELECT id FROM users WHERE LOWER(email) = LOWER($1) AND id != $2',
+      [email, userId]
+    );
+
+    if (existing.rows.length > 0) {
+      return res.status(400).json({ error: 'A user with this email already exists' });
+    }
+
+    // Map frontend role 'ministry' to database role 'ministry_leader'
+    const dbRole = role === 'ministry' ? 'ministry_leader' : role;
+
+    let query, params;
+    if (pin && pin.length === 4 && /^\d{4}$/.test(pin)) {
+      // Update with new PIN
+      query = `UPDATE users 
+               SET name = $1, email = $2, role = $3, pin = $4, active = $5
+               WHERE id = $6
+               RETURNING id, name as full_name, email, CASE WHEN role = 'ministry_leader' THEN 'ministry' ELSE role END as role, active, created_at`;
+      params = [full_name.trim(), email.toLowerCase().trim(), dbRole, pin, active !== undefined ? active : true, userId];
+    } else {
+      // Update without changing PIN
+      query = `UPDATE users 
+               SET name = $1, email = $2, role = $3, active = $4
+               WHERE id = $5
+               RETURNING id, name as full_name, email, CASE WHEN role = 'ministry_leader' THEN 'ministry' ELSE role END as role, active, created_at`;
+      params = [full_name.trim(), email.toLowerCase().trim(), dbRole, active !== undefined ? active : true, userId];
+    }
+
+    const result = await pool.query(query, params);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Log audit
+    await pool.query(
+      'INSERT INTO audit_log (user_id, action, details) VALUES ($1, $2, $3)',
+      [req.user.id, 'user_updated', `Updated user: ${email}`]
+    );
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'Email already exists' });
+    }
+    console.error('Update user error:', error);
+    res.status(500).json({ error: 'Server error updating user' });
+  }
+});
+
+// PUT /api/admin/users/:id/pin - Update user PIN
+router.put('/users/:id/pin', async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id);
+    const { pin } = req.body;
+
+    if (!pin || pin.length !== 4 || !/^\d{4}$/.test(pin)) {
+      return res.status(400).json({ error: 'PIN must be exactly 4 digits' });
+    }
+
+    const result = await pool.query(
+      'UPDATE users SET pin = $1 WHERE id = $2 RETURNING id',
+      [pin, userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Log audit
+    await pool.query(
+      'INSERT INTO audit_log (user_id, action, details) VALUES ($1, $2, $3)',
+      [req.user.id, 'user_pin_changed', `Changed PIN for user ID: ${userId}`]
+    );
+
+    res.json({ message: 'PIN updated successfully' });
+  } catch (error) {
+    console.error('Update PIN error:', error);
+    res.status(500).json({ error: 'Server error updating PIN' });
+  }
+});
+
+// DELETE /api/admin/users/:id - Delete user
+router.delete('/users/:id', async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id);
+
+    // Check if user created any forms
+    const formsCheck = await pool.query(
+      'SELECT COUNT(*) as count FROM ministry_forms WHERE ministry_leader_id = $1',
+      [userId]
+    );
+
+    if (parseInt(formsCheck.rows[0].count) > 0) {
+      return res.status(400).json({ 
+        error: 'Cannot delete user. They have created forms in the system.' 
+      });
+    }
+
+    const result = await pool.query(
+      'DELETE FROM users WHERE id = $1 RETURNING id, name as full_name',
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Log audit
+    await pool.query(
+      'INSERT INTO audit_log (user_id, action, details) VALUES ($1, $2, $3)',
+      [req.user.id, 'user_deleted', `Deleted user: ${result.rows[0].full_name}`]
+    );
+
+    res.json({ message: 'User deleted successfully' });
+  } catch (error) {
+    console.error('Delete user error:', error);
+    res.status(500).json({ error: 'Server error deleting user' });
+  }
+});
+
+// ============================================
 // GET PILLAR LIST (for dropdowns)
 // ============================================
 router.get('/pillars', async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, name, email 
+      `SELECT id, name as full_name, email 
        FROM users 
        WHERE role = 'pillar' AND active = true
        ORDER BY name`

@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { adminService } from '../../services/admin';
+import Header from '../Common/Header';
 import { 
   Users, Building2, Calendar, FileText, 
   Settings, TrendingUp, AlertCircle, CheckCircle 
@@ -46,7 +47,9 @@ const AdminDashboard = () => {
       title: 'Manage Users',
       description: 'Add, edit, or remove users and assign roles',
       icon: Users,
-      color: 'blue',
+      iconBg: 'bg-blue-100',
+      iconColor: 'text-blue-700',
+      borderColor: 'hover:border-blue-300',
       path: '/admin/users',
       stat: stats?.totalUsers || 0
     },
@@ -54,7 +57,9 @@ const AdminDashboard = () => {
       title: 'Manage Ministries',
       description: 'Configure ministries and assign pillar leaders',
       icon: Building2,
-      color: 'purple',
+      iconBg: 'bg-purple-100',
+      iconColor: 'text-purple-700',
+      borderColor: 'hover:border-purple-300',
       path: '/admin/ministries',
       stat: stats?.totalMinistries || 0
     },
@@ -62,7 +67,9 @@ const AdminDashboard = () => {
       title: 'Manage Event Types',
       description: 'Add or edit event type categories',
       icon: Calendar,
-      color: 'green',
+      iconBg: 'bg-green-100',
+      iconColor: 'text-green-700',
+      borderColor: 'hover:border-green-300',
       path: '/admin/event-types',
       stat: stats?.totalEventTypes || 0
     },
@@ -70,15 +77,18 @@ const AdminDashboard = () => {
       title: 'System Settings',
       description: 'Configure system-wide settings and preferences',
       icon: Settings,
-      color: 'gray',
+      iconBg: 'bg-gray-100',
+      iconColor: 'text-gray-700',
+      borderColor: 'hover:border-gray-300',
       path: '/admin/settings',
       stat: null
     }
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-7xl mx-auto px-4">
+    <div className="min-h-screen bg-gray-50">
+      <Header />
+      <div className="max-w-7xl mx-auto px-4 py-8">
         {/* Header */}
         <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
           <div className="flex items-center justify-between">
@@ -159,15 +169,15 @@ const AdminDashboard = () => {
                   className={`
                     bg-white rounded-lg shadow-sm p-6 text-left 
                     hover:shadow-md transition-shadow border-2 border-transparent
-                    hover:border-${action.color}-200
+                    ${action.borderColor}
                   `}
                 >
                   <div className="flex items-start justify-between mb-3">
                     <div className={`
                       w-12 h-12 rounded-lg flex items-center justify-center
-                      bg-${action.color}-100
+                      ${action.iconBg}
                     `}>
-                      <Icon className={`w-6 h-6 text-${action.color}-600`} />
+                      <Icon className={`w-6 h-6 ${action.iconColor}`} />
                     </div>
                     {action.stat !== null && (
                       <span className="text-2xl font-bold text-gray-900">

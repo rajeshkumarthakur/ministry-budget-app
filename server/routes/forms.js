@@ -135,17 +135,116 @@ router.get('/:id', async (req, res) => {
       sections[row.section] = row.data;
     });
 
-    // Get events
-    const eventsResult = await pool.query(
-      'SELECT * FROM events WHERE form_id = $1 ORDER BY event_date',
-      [formId]
-    );
+    // Get events - handle missing expected_attendance column gracefully
+    let eventsResult;
+    try {
+      eventsResult = await pool.query(
+        `SELECT 
+          id,
+          form_id,
+          event_date,
+          event_name,
+          event_type,
+          purpose,
+          description,
+          estimated_expenses,
+          estimated_expenses as budget_amount,
+          expected_attendance,
+          notes,
+          created_at
+         FROM events 
+         WHERE form_id = $1 
+         ORDER BY event_date`,
+        [formId]
+      );
+    } catch (dbError) {
+      // If expected_attendance column doesn't exist, select without it
+      if (dbError.code === '42703' || dbError.message.includes('expected_attendance')) {
+        eventsResult = await pool.query(
+          `SELECT 
+            id,
+            form_id,
+            event_date,
+            event_name,
+            event_type,
+            purpose,
+            description,
+            estimated_expenses,
+            estimated_expenses as budget_amount,
+            NULL as expected_attendance,
+            notes,
+            created_at
+           FROM events 
+           WHERE form_id = $1 
+           ORDER BY event_date`,
+          [formId]
+        );
+      } else {
+        throw dbError;
+      }
+    }
 
-    // Get goals
-    const goalsResult = await pool.query(
-      'SELECT * FROM goals WHERE form_id = $1',
-      [formId]
-    );
+    // Get goals - handle SMART goal fields gracefully
+    let goalsResult;
+    try {
+      goalsResult = await pool.query(
+        `SELECT 
+          id,
+          form_id,
+          goal,
+          goal_description,
+          specific,
+          measurable,
+          achievable,
+          relevant,
+          time_bound,
+          measure_target,
+          due_date,
+          created_at
+         FROM goals 
+         WHERE form_id = $1 
+         ORDER BY created_at`,
+        [formId]
+      );
+    } catch (dbError) {
+      // If SMART goal columns don't exist, select with legacy format and add SMART fields
+      if (dbError.code === '42703' || dbError.message?.includes('goal_description') || dbError.message?.includes('column') || dbError.message?.includes('does not exist')) {
+        console.warn('SMART goal columns not found, using legacy format');
+        try {
+          goalsResult = await pool.query(
+            `SELECT 
+              id,
+              form_id,
+              goal,
+              measure_target,
+              due_date,
+              created_at
+             FROM goals 
+             WHERE form_id = $1 
+             ORDER BY created_at`,
+            [formId]
+          );
+          // Add SMART fields to response for client compatibility
+          goalsResult.rows = goalsResult.rows.map(row => ({
+            ...row,
+            goal_description: row.goal || null,
+            specific: null,
+            measurable: null,
+            achievable: null,
+            relevant: null,
+            time_bound: null
+          }));
+        } catch (fallbackError) {
+          console.error('Error fetching goals with legacy format:', fallbackError);
+          // Return empty array if goals table doesn't exist or other error
+          goalsResult = { rows: [] };
+        }
+      } else {
+        console.error('Error fetching goals:', dbError);
+        // Return empty array on other errors to prevent form load failure
+        goalsResult = { rows: [] };
+      }
+    }
 
     // Get approvals history
     const approvalsResult = await pool.query(
@@ -238,7 +337,7 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const formId = parseInt(req.params.id);
-    const { section, data } = req.body;
+    const { section, data, sections } = req.body;
     const { id: userId, role } = req.user;
 
     const editCheck = await canEditForm(pool, userId, role, formId);
@@ -246,25 +345,55 @@ router.put('/:id', async (req, res) => {
       return res.status(403).json({ error: editCheck.reason });
     }
 
-    await pool.query(
-      `INSERT INTO form_data (form_id, section, data)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (form_id, section)
-       DO UPDATE SET data = $3, updated_at = CURRENT_TIMESTAMP`,
-      [formId, section, JSON.stringify(data)]
-    );
+    // Handle bulk section updates (from FormBuilder)
+    if (sections && typeof sections === 'object') {
+      const sectionKeys = Object.keys(sections);
+      for (const sectionKey of sectionKeys) {
+        await pool.query(
+          `INSERT INTO form_data (form_id, section, data)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (form_id, section)
+           DO UPDATE SET data = $3, updated_at = CURRENT_TIMESTAMP`,
+          [formId, sectionKey, JSON.stringify(sections[sectionKey])]
+        );
+      }
+      
+      await pool.query(
+        'UPDATE ministry_forms SET updated_at = CURRENT_TIMESTAMP WHERE id = $1',
+        [formId]
+      );
 
-    await pool.query(
-      'UPDATE ministry_forms SET updated_at = CURRENT_TIMESTAMP WHERE id = $1',
-      [formId]
-    );
+      await pool.query(
+        'INSERT INTO audit_log (form_id, user_id, action, details) VALUES ($1, $2, $3, $4)',
+        [formId, userId, 'form_updated', `Updated ${sectionKeys.length} section(s)`]
+      );
 
-    await pool.query(
-      'INSERT INTO audit_log (form_id, user_id, action, details) VALUES ($1, $2, $3, $4)',
-      [formId, userId, 'form_updated', `Updated section: ${section}`]
-    );
+      res.json({ message: 'Form updated successfully' });
+    }
+    // Handle single section update (backward compatibility)
+    else if (section && data) {
+      await pool.query(
+        `INSERT INTO form_data (form_id, section, data)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (form_id, section)
+         DO UPDATE SET data = $3, updated_at = CURRENT_TIMESTAMP`,
+        [formId, section, JSON.stringify(data)]
+      );
 
-    res.json({ message: 'Form updated successfully' });
+      await pool.query(
+        'UPDATE ministry_forms SET updated_at = CURRENT_TIMESTAMP WHERE id = $1',
+        [formId]
+      );
+
+      await pool.query(
+        'INSERT INTO audit_log (form_id, user_id, action, details) VALUES ($1, $2, $3, $4)',
+        [formId, userId, 'form_updated', `Updated section: ${section}`]
+      );
+
+      res.json({ message: 'Form updated successfully' });
+    } else {
+      return res.status(400).json({ error: 'Either section/data or sections object is required' });
+    }
 
   } catch (error) {
     console.error('Update form error:', error);

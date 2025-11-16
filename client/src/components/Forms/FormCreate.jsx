@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { lovService, formsService } from '../../services/forms';
+import Header from '../Common/Header';
 import { AlertCircle, ArrowRight, FileText } from 'lucide-react';
 
 const FormCreate = () => {
@@ -57,8 +58,9 @@ const FormCreate = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-2xl mx-auto px-4">
+    <div className="min-h-screen bg-gray-50">
+      <Header />
+      <div className="max-w-2xl mx-auto px-4 py-8">
         {/* Header */}
         <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
           <div className="flex items-center space-x-3 mb-2">

@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { formsService } from '../../services/forms';
+import Header from '../Common/Header';
 import { AlertCircle, CheckCircle, Save, Send, ArrowLeft, ArrowRight } from 'lucide-react';
 import FormSection1 from './sections/FormSection1';
 import FormSection2 from './sections/FormSection2';
@@ -181,8 +182,9 @@ const FormBuilder = () => {
   const completionPercentage = getCompletionPercentage();
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-5xl mx-auto px-4">
+    <div className="min-h-screen bg-gray-50">
+      <Header />
+      <div className="max-w-5xl mx-auto px-4 py-8">
         {/* Header */}
         <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
           <div className="flex items-center justify-between mb-4">
@@ -226,7 +228,7 @@ const FormBuilder = () => {
                     ? 'bg-church-primary text-white'
                     : formData[section.key] && Object.keys(formData[section.key]).length > 0
                       ? 'bg-green-100 text-green-800 hover:bg-green-200'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
                   }
                 `}
               >
@@ -280,7 +282,7 @@ const FormBuilder = () => {
             <button
               onClick={() => handleSave(false)}
               disabled={saving}
-              className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium flex items-center space-x-2 disabled:opacity-50"
+              className="px-4 py-2 bg-gray-100 text-gray-800 rounded-lg hover:bg-gray-200 font-medium flex items-center space-x-2 disabled:opacity-50 transition-colors"
             >
               <Save className="w-4 h-4" />
               <span>{saving ? 'Saving...' : 'Save Draft'}</span>
