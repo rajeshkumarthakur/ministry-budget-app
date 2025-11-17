@@ -22,10 +22,6 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:3001',
         changeOrigin: true,
-      },
-      '/assets': {
-        target: 'http://localhost:3001',
-        changeOrigin: true,
       }
     }
   },

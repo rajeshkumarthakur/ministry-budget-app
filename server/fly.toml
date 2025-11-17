@@ -1,0 +1,20 @@
+# fly.toml app configuration file generated for voice-church-api-prod on 2025-11-17T22:56:21+05:30
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'voice-church-api-prod'
+primary_region = 'iad'
+
+[build]
+
+[http_service]
+  internal_port = 3001
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+[[vm]]
+  size = 'shared-cpu-1x'

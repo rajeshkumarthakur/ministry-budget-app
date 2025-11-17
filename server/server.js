@@ -15,34 +15,58 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Database connection pool
-const pool = new Pool({
-  user: process.env.DB_USER,
-  host: process.env.DB_HOST,
-  database: process.env.DB_NAME,
-  password: process.env.DB_PASSWORD,
-  port: process.env.DB_PORT,
-});
+// Support both DATABASE_URL (for Fly.io/Supabase) and individual env vars
+const pool = process.env.DATABASE_URL
+  ? new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: {
+        rejectUnauthorized: false
+      },
+      // Connection pool settings optimized for Fly.io
+      max: 20,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+    })
+  : new Pool({
+      user: process.env.DB_USER,
+      host: process.env.DB_HOST,
+      database: process.env.DB_NAME,
+      password: process.env.DB_PASSWORD,
+      port: process.env.DB_PORT,
+    });
 
 // Test database connection
+pool.on('connect', () => {
+  console.log('✅ Database connected successfully');
+});
+
+pool.on('error', (err) => {
+  console.error('❌ Unexpected database error:', err);
+});
+
+// Test initial connection
 pool.query('SELECT NOW()', (err, res) => {
   if (err) {
     console.error('❌ Database connection error:', err);
   } else {
-    console.log('✓ Database connected successfully');
+    console.log('✓ Initial database test successful');
   }
 });
 
 // Middleware
 app.use(helmet()); // Security headers
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:3000',
+  origin: process.env.CORS_ORIGIN 
+    ? process.env.CORS_ORIGIN.split(',') // Support multiple origins
+    : process.env.CLIENT_URL || 'http://localhost:3000',
   credentials: true
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Serve static files (for church logo)
+// Serve static files (for church logo and other assets)
 app.use('/assets', express.static(path.join(__dirname, '..', 'public', 'assets')));
+app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // Rate limiting for auth endpoints (disabled in development)
 const authLimiter = process.env.NODE_ENV === 'production' 
@@ -306,15 +330,28 @@ app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
 });
 
 // ============================================
-// Health Check
+// Health Check (for Fly.io monitoring)
 // ============================================
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    timestamp: new Date().toISOString(),
-    service: 'ministry-budget-api',
-    version: '2.5'
-  });
+app.get('/health', async (req, res) => {
+  try {
+    // Check database connection
+    await pool.query('SELECT 1');
+    res.json({ 
+      status: 'healthy', 
+      timestamp: new Date().toISOString(),
+      service: 'ministry-budget-api',
+      version: '2.5',
+      environment: process.env.NODE_ENV || 'development',
+      database: 'connected'
+    });
+  } catch (error) {
+    console.error('Health check failed:', error);
+    res.status(503).json({ 
+      status: 'unhealthy',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // ============================================
@@ -330,20 +367,28 @@ app.use((req, res) => {
 });
 
 // ============================================
-// Start Server
+// Start Server (Listen on 0.0.0.0 for Docker/Fly.io)
 // ============================================
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log('=================================');
   console.log('🚀 The Voice Church - Ministry Budget API');
   console.log(`✓ Server running on port ${PORT}`);
+  console.log(`✓ Listening on 0.0.0.0:${PORT}`);
   console.log(`✓ Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log('✓ Phase 2.5: Ministry Management & Pillar Routing');
   console.log('=================================');
 });
 
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, closing server...');
-  pool.end();
+// Graceful shutdown (for Fly.io deployments)
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM received, closing server gracefully...');
+  await pool.end();
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  console.log('SIGINT received, closing server gracefully...');
+  await pool.end();
   process.exit(0);
 });
 

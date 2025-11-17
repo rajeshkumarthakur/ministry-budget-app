@@ -24,6 +24,13 @@ export default {
         'church-primary': '#6AB547', // Same as church-green
         'church-secondary': '#5a9a3d', // Darker shade for hover states
       },
+      backgroundSize: {
+        'size-200': '200% 200%',
+      },
+      backgroundPosition: {
+        'pos-0': '0% 0%',
+        'pos-100': '100% 100%',
+      },
     },
   },
   plugins: [],
