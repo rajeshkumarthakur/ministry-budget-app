@@ -58,7 +58,7 @@ app.use(helmet()); // Security headers
 app.use(cors({
   origin: process.env.CORS_ORIGIN 
     ? process.env.CORS_ORIGIN.split(',') // Support multiple origins
-    : process.env.CLIENT_URL || 'http://localhost:3000',
+    : [process.env.CLIENT_URL || 'http://localhost:3000', 'thevoicechurch.synapsedigitalai.com'],
   credentials: true
 }));
 app.use(express.json());

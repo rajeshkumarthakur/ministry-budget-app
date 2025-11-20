@@ -137,7 +137,7 @@ Wait 2-3 minutes...
 Since frontend URL changed, update CORS:
 
 ```bash
-fly secrets set CORS_ORIGIN="https://ministry-budget-app.vercel.app,http://localhost:5173" -a voice-church-api-dev
+fly secrets set CORS_ORIGIN="https://ministry-budget-app.vercel.app,http://localhost:5173,http://localhost:3000" -a voice-church-api-dev
 ```
 
 Or if using custom domain:
