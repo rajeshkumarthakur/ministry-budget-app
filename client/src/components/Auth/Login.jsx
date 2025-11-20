@@ -91,6 +91,7 @@ const Login = () => {
             <h2 className="text-xl font-bold bg-gradient-to-r from-gray-800 to-gray-900 bg-clip-text text-transparent mb-4 text-center">
               Welcome Back
             </h2>
+            {/* Updated - Nov 2024 */}
 
             {error && (
               <div className="mb-4 p-3 bg-gradient-to-r from-red-50 to-red-100 border-l-4 border-red-500 rounded-r-xl flex items-start gap-2 animate-shake shadow-lg">
