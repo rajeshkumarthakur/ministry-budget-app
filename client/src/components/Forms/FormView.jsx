@@ -4,18 +4,27 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { formsService } from '../../services/forms';
 import { useAuth } from '../../context/AuthContext';
 import Header from '../Common/Header';
-import { AlertCircle, Calendar, DollarSign, Users, Target, ArrowLeft, FileText, CheckCircle, Clock } from 'lucide-react';
+import { AlertCircle, Calendar, DollarSign, Users, Target, ArrowLeft, FileText, CheckCircle, Clock, XCircle, ThumbsUp, ThumbsDown, MessageCircle, RotateCcw, AlertTriangle } from 'lucide-react';
 import FormExport from './FormExport';
 
 const FormView = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const [form, setForm] = useState(null);
   const [events, setEvents] = useState([]);
   const [goals, setGoals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [approvalAction, setApprovalAction] = useState('');
+  const [approvalComments, setApprovalComments] = useState('');
+  const [approving, setApproving] = useState(false);
+  const [showQueryModal, setShowQueryModal] = useState(false);
+  const [queryDescription, setQueryDescription] = useState('');
+  const [querying, setQuerying] = useState(false);
+  const [showRevokeModal, setShowRevokeModal] = useState(false);
+  const [revoking, setRevoking] = useState(false);
 
   useEffect(() => {
     loadFormData();
@@ -70,6 +79,130 @@ const FormView = () => {
     const operating = parseFloat(form?.sections?.section7?.operating_budget || 0);
     const capital = parseFloat(form?.sections?.section7?.capital_expenses || 0);
     return eventsBudget + operating + capital;
+  };
+
+  const canApprove = () => {
+    if (!user || !form) return false;
+    // Pillar can approve if form is pending pillar and they haven't made a decision yet
+    if (user.role === 'pillar' && form.status === 'pending_pillar') {
+      // Don't show approve buttons if decision already made (form moved forward or rejected)
+      return true;
+    }
+    return false;
+  };
+
+  const canQuery = () => {
+    if (!user || !form) return false;
+    // Pastor can act on forms that are pending pastor approval OR already approved/rejected
+    // But not if they've already made a decision (moved to approved or rejected)
+    if (user.role === 'pastor') {
+      // Can only act if form is pending_pastor (hasn't made decision yet)
+      if (form.status === 'pending_pastor') {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const canRevoke = () => {
+    if (!user || !form) return false;
+    
+    // Don't show revoke button if approve/reject buttons are visible
+    if (canApprove() || canQuery()) {
+      return false;
+    }
+    
+    // Admin can revoke any form (except draft, and not when approve/query buttons are shown)
+    if (user.role === 'admin' && form.status !== 'draft') {
+      return true;
+    }
+    
+    // Pillar can revoke forms they've already acted on (not pending_pillar, not draft)
+    if (user.role === 'pillar') {
+      if (form.status !== 'draft' && form.status !== 'pending_pillar') {
+        return true;
+      }
+    }
+    
+    // Pastor can revoke forms they've already acted on (not pending_pastor, not pending_pillar, not draft)
+    if (user.role === 'pastor') {
+      if (form.status !== 'draft' && form.status !== 'pending_pillar' && form.status !== 'pending_pastor') {
+        return true;
+      }
+    }
+    
+    return false;
+  };
+
+  const handleApprovalClick = (action) => {
+    setApprovalAction(action);
+    setApprovalComments('');
+    setShowApprovalModal(true);
+  };
+
+  const handleApprovalSubmit = async () => {
+    try {
+      setApproving(true);
+      await formsService.approveForm(id, approvalAction, approvalComments);
+      setShowApprovalModal(false);
+      // Reload form data
+      await loadFormData();
+      alert(`Form ${approvalAction}d successfully!`);
+    } catch (error) {
+      console.error('Error approving form:', error);
+      alert(error.response?.data?.error || `Failed to ${approvalAction} form`);
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  const handleQueryClick = () => {
+    setQueryDescription('');
+    setShowQueryModal(true);
+  };
+
+  const handleRevokeClick = () => {
+    setShowRevokeModal(true);
+  };
+
+  const handleRevokeConfirm = async () => {
+    try {
+      setRevoking(true);
+      await formsService.revokeDecision(id);
+      setShowRevokeModal(false);
+      // Reload form data
+      await loadFormData();
+      alert('Decision revoked successfully. Form reset to pending pillar approval.');
+    } catch (error) {
+      console.error('Error revoking decision:', error);
+      alert(error.response?.data?.error || 'Failed to revoke decision');
+    } finally {
+      setRevoking(false);
+    }
+  };
+
+  const handleQuerySubmit = async () => {
+    if (!queryDescription.trim()) {
+      alert('Please enter a query description');
+      return;
+    }
+
+    try {
+      setQuerying(true);
+      const result = await formsService.raiseQuery(id, queryDescription);
+      setShowQueryModal(false);
+      // Reload form data
+      await loadFormData();
+      const message = result.revoked 
+        ? `Query sent successfully to ${result.notifiedPillars} pillar(s). Form has been revoked and reset to pending pillar approval.`
+        : `Query sent successfully to ${result.notifiedPillars} pillar(s).`;
+      alert(message);
+    } catch (error) {
+      console.error('Error raising query:', error);
+      alert(error.response?.data?.error || 'Failed to raise query');
+    } finally {
+      setQuerying(false);
+    }
   };
 
   if (loading) {
@@ -134,6 +267,103 @@ const FormView = () => {
             </p>
           )}
         </div>
+
+        {/* Approval Section - Only show if user can approve */}
+        {canApprove() && (
+          <div className="bg-gradient-to-r from-blue-50 to-purple-50 border-2 border-blue-200 rounded-lg p-6 mb-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 mb-1">
+                  {user.role === 'pillar' ? 'Pillar Approval Required' : 'Pastor Approval Required'}
+                </h3>
+                <p className="text-sm text-gray-600">
+                  This form is awaiting your review and approval
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => handleApprovalClick('reject')}
+                  className="flex items-center gap-2 px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition-colors shadow-md"
+                >
+                  <ThumbsDown className="w-5 h-5" />
+                  Reject
+                </button>
+                <button
+                  onClick={() => handleApprovalClick('approve')}
+                  className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium transition-colors shadow-md"
+                >
+                  <ThumbsUp className="w-5 h-5" />
+                  Approve
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Query Section - Only show for pastor */}
+        {canQuery() && (
+          <div className="bg-gradient-to-r from-indigo-50 to-blue-50 border-2 border-indigo-200 rounded-lg p-6 mb-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 mb-1">
+                  Pastor Actions
+                </h3>
+                <p className="text-sm text-gray-600">
+                  Review this form and take action: approve, reject, or raise a query.
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => handleApprovalClick('reject')}
+                  className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition-colors shadow-md"
+                >
+                  <XCircle className="w-5 h-5" />
+                  Reject
+                </button>
+                <button
+                  onClick={() => handleApprovalClick('approve')}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium transition-colors shadow-md"
+                >
+                  <CheckCircle className="w-5 h-5" />
+                  Accept
+                </button>
+                <button
+                  onClick={handleQueryClick}
+                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium transition-colors shadow-md"
+                >
+                  <MessageCircle className="w-5 h-5" />
+                  Raise Query
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Revoke Section - Show after pillar/pastor has made a decision */}
+        {canRevoke() && (
+          <div className="bg-gradient-to-r from-orange-50 to-red-50 border-2 border-orange-200 rounded-lg p-6 mb-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 mb-1">
+                  Revoke Decision
+                </h3>
+                <p className="text-sm text-gray-600">
+                  {user.role === 'pillar' 
+                    ? 'You can revoke your decision and reset this form to pending pillar approval.'
+                    : 'You can revoke your decision and reset this form to pending pastor approval.'}
+                </p>
+              </div>
+              <button
+                onClick={handleRevokeClick}
+                className="flex items-center gap-2 px-6 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium transition-colors shadow-md"
+              >
+                <RotateCcw className="w-5 h-5" />
+                Revoke Decision
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Export Section */}
           <FormExport 
             formId={id}
@@ -368,9 +598,151 @@ const FormView = () => {
             </div>
           </div>
         )}
+
+        {/* Approval Modal */}
+        {showApprovalModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg max-w-md w-full p-6">
+              <h3 className="text-xl font-bold text-gray-900 mb-4">
+                {approvalAction === 'approve' ? 'Approve Form' : 'Reject Form'}
+              </h3>
+              
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Comments {approvalAction === 'reject' && <span className="text-red-500">*</span>}
+                </label>
+                <textarea
+                  value={approvalComments}
+                  onChange={(e) => setApprovalComments(e.target.value)}
+                  rows="4"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-church-primary focus:border-transparent"
+                  placeholder={approvalAction === 'approve' ? 'Optional comments...' : 'Please provide a reason for rejection...'}
+                  required={approvalAction === 'reject'}
+                />
+              </div>
+
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={() => setShowApprovalModal(false)}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+                  disabled={approving}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleApprovalSubmit}
+                  disabled={approving || (approvalAction === 'reject' && !approvalComments.trim())}
+                  className={`px-6 py-2 text-white rounded-lg font-medium ${
+                    approvalAction === 'approve' 
+                      ? 'bg-green-600 hover:bg-green-700' 
+                      : 'bg-red-600 hover:bg-red-700'
+                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                >
+                  {approving ? 'Processing...' : `Confirm ${approvalAction === 'approve' ? 'Approval' : 'Rejection'}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Query Modal */}
+        {showQueryModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg max-w-md w-full p-6">
+              <h3 className="text-xl font-bold text-gray-900 mb-4">
+                Raise Query
+              </h3>
+              
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Query Description <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  value={queryDescription}
+                  onChange={(e) => setQueryDescription(e.target.value)}
+                  rows="5"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  placeholder="Describe your query or concern about this form..."
+                  required
+                  autoFocus
+                />
+              </div>
+
+              {(form?.status === 'pending_pastor' || form?.status === 'approved' || form?.status === 'rejected') && (
+                <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-4">
+                  <p className="text-sm text-orange-800">
+                    <strong>Note:</strong> This query will automatically revoke the current decision and reset the form to pending pillar approval.
+                  </p>
+                </div>
+              )}
+
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={() => setShowQueryModal(false)}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+                  disabled={querying}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleQuerySubmit}
+                  disabled={querying || !queryDescription.trim()}
+                  className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {querying ? 'Sending...' : 'Send Query'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Revoke Modal */}
+        {showRevokeModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg max-w-md w-full p-6">
+              <div className="flex items-center justify-center w-16 h-16 bg-orange-100 rounded-full mx-auto mb-4">
+                <AlertTriangle className="w-8 h-8 text-orange-600" />
+              </div>
+
+              <h3 className="text-xl font-bold text-gray-900 text-center mb-2">
+                Revoke Decision
+              </h3>
+              
+              <p className="text-gray-600 text-center mb-4">
+                Are you sure you want to revoke your decision for this form?
+              </p>
+
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-4">
+                <p className="text-sm text-gray-700 text-center">
+                  {user.role === 'pillar' 
+                    ? 'This will reset the form to pending pillar approval and notify pillar users.'
+                    : 'This will reset the form to pending pastor approval.'}
+                </p>
+              </div>
+
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={() => setShowRevokeModal(false)}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+                  disabled={revoking}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleRevokeConfirm}
+                  disabled={revoking}
+                  className="px-6 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {revoking ? 'Revoking...' : 'Confirm Revoke'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 };
 
 export default FormView;
+

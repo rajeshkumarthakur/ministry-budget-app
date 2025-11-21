@@ -11,14 +11,12 @@
  */
 const canEditForm = async (pool, userId, role, formId) => {
   try {
-    // Admins can edit any form
-    if (role === 'admin') {
-      return { allowed: true };
-    }
-
-    // Get form details
+    // Get form details with ministry info
     const formResult = await pool.query(
-      'SELECT ministry_leader_id, status FROM ministry_forms WHERE id = $1',
+      `SELECT mf.ministry_leader_id, mf.status, mf.ministry_id, m.assigned_pillars 
+       FROM ministry_forms mf
+       LEFT JOIN ministries m ON mf.ministry_id = m.id
+       WHERE mf.id = $1`,
       [formId]
     );
 
@@ -28,19 +26,38 @@ const canEditForm = async (pool, userId, role, formId) => {
 
     const form = formResult.rows[0];
 
-    // Ministry leaders can only edit their own forms
+    // Admin can edit any form at any time
+    if (role === 'admin') {
+      return { allowed: true };
+    }
+
+    // Ministry leader can only edit forms from ministries they lead
     if (role === 'ministry_leader') {
       if (form.ministry_leader_id !== userId) {
-        return { allowed: false, reason: 'You can only edit your own forms' };
-      }
-      // Can only edit drafts
-      if (form.status !== 'draft') {
-        return { allowed: false, reason: 'You can only edit draft forms' };
+        return { allowed: false, reason: 'You can only edit forms from ministries you lead' };
       }
       return { allowed: true };
     }
 
-    // Pillars and pastors cannot edit forms
+    // Pillar can only edit forms from ministries they're assigned to
+    if (role === 'pillar') {
+      // Check if pillar is assigned to this ministry
+      if (form.assigned_pillars && Array.isArray(form.assigned_pillars) && form.assigned_pillars.length > 0) {
+        if (form.assigned_pillars.includes(userId)) {
+          return { allowed: true };
+        }
+        return { allowed: false, reason: 'You can only edit forms from ministries you are assigned to' };
+      }
+      // If no assigned pillars for the ministry, don't allow editing
+      return { allowed: false, reason: 'No pillars are assigned to this ministry, so you cannot edit this form' };
+    }
+
+    // Pastor can edit any form at any time
+    if (role === 'pastor') {
+      return { allowed: true };
+    }
+
+    // All other roles cannot edit forms
     return { allowed: false, reason: 'You do not have permission to edit forms' };
 
   } catch (error) {
@@ -52,20 +69,21 @@ const canEditForm = async (pool, userId, role, formId) => {
 /**
  * Check if a role can approve a form
  * @param {Pool} pool - Database connection pool
+ * @param {number} userId - User ID
  * @param {string} role - User role
  * @param {number} formId - Form ID
  * @returns {Promise<{allowed: boolean, reason?: string}>}
  */
-const canApproveForm = async (pool, role, formId) => {
+const canApproveForm = async (pool, userId, role, formId) => {
   try {
     // Admins can approve any form
     if (role === 'admin') {
       return { allowed: true };
     }
 
-    // Get form status
+    // Get form status and ministry
     const formResult = await pool.query(
-      'SELECT status FROM ministry_forms WHERE id = $1',
+      'SELECT status, ministry_id FROM ministry_forms WHERE id = $1',
       [formId]
     );
 
@@ -73,15 +91,35 @@ const canApproveForm = async (pool, role, formId) => {
       return { allowed: false, reason: 'Form not found' };
     }
 
-    const { status } = formResult.rows[0];
+    const { status, ministry_id } = formResult.rows[0];
 
-    // Pillars can approve forms pending pillar approval
-    if (role === 'pillar') {
-      if (status === 'pending_pillar') {
-        return { allowed: true };
-      }
+  // Pillars can approve forms pending pillar approval
+  if (role === 'pillar') {
+    if (status !== 'pending_pillar') {
       return { allowed: false, reason: 'Form is not pending pillar approval' };
     }
+    
+    // Check if this pillar is assigned to the form's ministry
+    const ministryResult = await pool.query(
+      'SELECT assigned_pillars FROM ministries WHERE id = $1',
+      [ministry_id]
+    );
+    
+    if (ministryResult.rows.length === 0) {
+      return { allowed: false, reason: 'Ministry not found' };
+    }
+    
+    const { assigned_pillars } = ministryResult.rows[0];
+    
+    // If ministry has assigned pillars, check if this pillar is one of them
+    if (assigned_pillars && assigned_pillars.length > 0) {
+      if (!assigned_pillars.includes(userId)) {
+        return { allowed: false, reason: 'You are not assigned to this ministry' };
+      }
+    }
+    
+    return { allowed: true };
+  }
 
     // Pastors can approve forms pending pastor approval
     if (role === 'pastor') {

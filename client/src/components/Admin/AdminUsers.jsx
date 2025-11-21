@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { adminService } from '../../services/admin';
 import Header from '../Common/Header';
+import DeleteConfirmationModal from '../Common/DeleteConfirmationModal';
 import { 
   Plus, Edit2, Trash2, User, Key, Shield, ArrowLeft, 
   Search, AlertCircle, Eye, EyeOff 
@@ -18,11 +19,14 @@ const AdminUsers = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [error, setError] = useState('');
   const [showPin, setShowPin] = useState(false);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [userToDelete, setUserToDelete] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const [formData, setFormData] = useState({
     full_name: '',
     email: '',
-    role: 'ministry',
+    role: 'ministry_leader',
     pin: '',
     active: true
   });
@@ -33,7 +37,7 @@ const AdminUsers = () => {
   });
 
   const roles = [
-    { value: 'ministry', label: 'Ministry Leader', color: 'blue' },
+    { value: 'ministry_leader', label: 'Ministry Leader', color: 'blue' },
     { value: 'pillar', label: 'Pillar Leader', color: 'purple' },
     { value: 'pastor', label: 'Pastor', color: 'green' },
     { value: 'admin', label: 'Administrator', color: 'red' }
@@ -61,7 +65,7 @@ const AdminUsers = () => {
     setFormData({
       full_name: '',
       email: '',
-      role: 'ministry',
+      role: 'ministry_leader',
       pin: '',
       active: true
     });
@@ -80,17 +84,23 @@ const AdminUsers = () => {
     setShowModal(true);
   };
 
-  const handleDelete = async (id, name) => {
-    if (!window.confirm(`Are you sure you want to delete "${name}"? This action cannot be undone.`)) {
-      return;
-    }
+  const handleDelete = (user) => {
+    setUserToDelete(user);
+    setDeleteModalOpen(true);
+  };
 
+  const handleDeleteConfirm = async () => {
     try {
-      await adminService.deleteUser(id);
+      setIsDeleting(true);
+      await adminService.deleteUser(userToDelete.id);
+      setDeleteModalOpen(false);
+      setUserToDelete(null);
       await loadUsers();
     } catch (error) {
       console.error('Error deleting user:', error);
-      alert(error.response?.data?.message || 'Failed to delete user. They may have associated data.');
+      alert(error.response?.data?.error || error.response?.data?.message || 'Failed to delete user. They may have associated data.');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -304,7 +314,7 @@ const AdminUsers = () => {
                       </td>
                       <td className="px-6 py-4">
                         <span className={`
-                          px-3 py-1 text-xs font-medium rounded-full
+                          px-3 py-1 text-xs font-medium rounded-full inline-block w-fit
                           bg-${getRoleBadgeColor(user.role)}-100 
                           text-${getRoleBadgeColor(user.role)}-800
                         `}>
@@ -337,7 +347,7 @@ const AdminUsers = () => {
                           <Edit2 className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => handleDelete(user.id, user.full_name)}
+                          onClick={() => handleDelete(user)}
                           className="text-red-600 hover:text-red-800 p-2 hover:bg-red-50 rounded-lg inline-flex items-center"
                           title="Delete"
                         >
@@ -442,6 +452,9 @@ const AdminUsers = () => {
                         </option>
                       ))}
                     </select>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Ministry assignments are managed in the "Manage Ministries" section
+                    </p>
                   </div>
 
                   <div>
@@ -582,6 +595,20 @@ const AdminUsers = () => {
             </div>
           </div>
         )}
+
+        {/* Delete Confirmation Modal */}
+        <DeleteConfirmationModal
+          isOpen={deleteModalOpen}
+          onClose={() => {
+            setDeleteModalOpen(false);
+            setUserToDelete(null);
+          }}
+          onConfirm={handleDeleteConfirm}
+          title="Delete User"
+          message="Are you sure you want to delete this user? This action cannot be undone."
+          itemName={userToDelete ? `${userToDelete.full_name} (${userToDelete.email})` : ''}
+          isDeleting={isDeleting}
+        />
       </div>
     </div>
   );

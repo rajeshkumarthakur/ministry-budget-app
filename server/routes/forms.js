@@ -30,9 +30,9 @@ router.get('/', async (req, res) => {
       // Admin and Pastor see all forms
       query = `
         SELECT 
-          f.id, f.form_number, f.status, 
+          f.id, f.form_number, f.status, f.ministry_leader_id,
           f.created_at, f.updated_at, f.submitted_at,
-          m.name as ministry_name,
+          m.name as ministry_name, m.assigned_pillars,
           u.name as leader_name, u.email as leader_email
         FROM ministry_forms f
         LEFT JOIN ministries m ON f.ministry_id = m.id
@@ -44,32 +44,31 @@ router.get('/', async (req, res) => {
       // Pillars see forms from their assigned ministries
       query = `
         SELECT 
-          f.id, f.form_number, f.status, 
+          f.id, f.form_number, f.status, f.ministry_leader_id,
           f.created_at, f.updated_at, f.submitted_at,
-          m.name as ministry_name,
+          m.name as ministry_name, m.assigned_pillars,
           u.name as leader_name, u.email as leader_email
         FROM ministry_forms f
         LEFT JOIN ministries m ON f.ministry_id = m.id
         LEFT JOIN users u ON f.ministry_leader_id = u.id
-        WHERE m.pillar_id = $1 OR f.status NOT IN ('pending_pillar', 'draft')
+        WHERE f.status NOT IN ('draft')
         ORDER BY f.updated_at DESC
       `;
-      params = [userId];
+      params = [];
     } else if (role === 'ministry_leader') {
-      // Ministry leaders only see their own forms
+      // Ministry leaders see all forms but can only edit their own
       query = `
         SELECT 
-          f.id, f.form_number, f.status, 
+          f.id, f.form_number, f.status, f.ministry_leader_id,
           f.created_at, f.updated_at, f.submitted_at,
-          m.name as ministry_name,
+          m.name as ministry_name, m.assigned_pillars,
           u.name as leader_name, u.email as leader_email
         FROM ministry_forms f
         LEFT JOIN ministries m ON f.ministry_id = m.id
         LEFT JOIN users u ON f.ministry_leader_id = u.id
-        WHERE f.ministry_leader_id = $1
         ORDER BY f.updated_at DESC
       `;
-      params = [userId];
+      params = [];
     } else {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
@@ -96,15 +95,11 @@ router.get('/:id', async (req, res) => {
       `SELECT 
         f.*, 
         m.name as ministry_name,
-        m.pillar_id,
         u.name as leader_name, 
-        u.email as leader_email,
-        p.name as pillar_name,
-        p.email as pillar_email
+        u.email as leader_email
       FROM ministry_forms f
       LEFT JOIN ministries m ON f.ministry_id = m.id
       LEFT JOIN users u ON f.ministry_leader_id = u.id
-      LEFT JOIN users p ON m.pillar_id = p.id
       WHERE f.id = $1`,
       [formId]
     );
@@ -120,8 +115,9 @@ router.get('/:id', async (req, res) => {
       return res.status(403).json({ error: 'You can only view your own forms' });
     }
 
-    if (role === 'pillar' && form.pillar_id !== userId && form.status === 'draft') {
-      return res.status(403).json({ error: 'You can only view forms from your assigned ministries' });
+    // Pillars can view all submitted forms
+    if (role === 'pillar' && form.status === 'draft') {
+      return res.status(403).json({ error: 'You can only view submitted forms' });
     }
 
     // Get form sections data
@@ -406,16 +402,35 @@ router.delete('/:id', async (req, res) => {
     const formId = parseInt(req.params.id);
     const { id: userId, role } = req.user;
 
-    const editCheck = await canEditForm(pool, userId, role, formId);
-    if (!editCheck.allowed) {
-      return res.status(403).json({ error: editCheck.reason });
+    // Get form details
+    const formResult = await pool.query(
+      'SELECT ministry_leader_id, status, form_number FROM ministry_forms WHERE id = $1',
+      [formId]
+    );
+
+    if (formResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Form not found' });
+    }
+
+    const form = formResult.rows[0];
+
+    // Check delete permissions
+    // Admin can delete any form
+    // Form creator can only delete their own draft forms
+    if (role !== 'admin') {
+      if (role !== 'ministry_leader' || form.ministry_leader_id !== userId) {
+        return res.status(403).json({ error: 'You can only delete your own forms' });
+      }
+      if (form.status !== 'draft') {
+        return res.status(403).json({ error: 'You can only delete draft forms' });
+      }
     }
 
     await pool.query('DELETE FROM ministry_forms WHERE id = $1', [formId]);
 
     await pool.query(
       'INSERT INTO audit_log (user_id, action, details) VALUES ($1, $2, $3)',
-      [userId, 'form_deleted', `Deleted form ID: ${formId}`]
+      [userId, 'form_deleted', `Deleted form ${form.form_number}`]
     );
 
     res.json({ message: 'Form deleted successfully' });
@@ -436,6 +451,22 @@ router.post('/:id/submit', async (req, res) => {
       return res.status(403).json({ error: editCheck.reason });
     }
 
+    // Get form details including ministry info
+    const formResult = await pool.query(
+      `SELECT mf.form_number, mf.ministry_id, m.name as ministry_name, u.name as submitter_name
+       FROM ministry_forms mf
+       LEFT JOIN ministries m ON mf.ministry_id = m.id
+       LEFT JOIN users u ON mf.ministry_leader_id = u.id
+       WHERE mf.id = $1`,
+      [formId]
+    );
+
+    if (formResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Form not found' });
+    }
+
+    const { form_number, ministry_id, ministry_name, submitter_name } = formResult.rows[0];
+
     await pool.query(
       `UPDATE ministry_forms 
        SET status = 'pending_pillar', 
@@ -450,6 +481,37 @@ router.post('/:id/submit', async (req, res) => {
       'INSERT INTO audit_log (form_id, user_id, action, details) VALUES ($1, $2, $3, $4)',
       [formId, userId, 'form_submitted', 'Form submitted for pillar approval']
     );
+
+    // Create notifications for pillar users with affiliated ministry
+    const pillarResult = await pool.query(
+      `SELECT id, name, email 
+       FROM users 
+       WHERE role = 'pillar' 
+       AND active = true
+`,
+      []
+    );
+
+    // Insert notifications for each matching pillar
+    for (const pillar of pillarResult.rows) {
+      try {
+        await pool.query(
+          `INSERT INTO notifications (user_id, form_id, type, title, message)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (user_id, form_id, type) DO NOTHING`,
+          [
+            pillar.id,
+            formId,
+            'form_submitted',
+            'New Form Awaiting Approval',
+            `Form ${form_number} from ${ministry_name} has been submitted and is waiting for your approval.`
+          ]
+        );
+      } catch (notifError) {
+        console.error(`Failed to create notification for pillar ${pillar.id}:`, notifError);
+        // Continue with other notifications even if one fails
+      }
+    }
 
     res.json({ message: 'Form submitted successfully for pillar approval' });
 
@@ -468,11 +530,10 @@ router.post('/:id/approve', validateApproval, async (req, res) => {
     const { action, comments, signature } = req.body;
     const { id: userId, role } = req.user;
 
-    // Get form details including ministry and pillar
+    // Get form details
     const formResult = await pool.query(
-      `SELECT f.status, m.pillar_id 
+      `SELECT f.status
        FROM ministry_forms f
-       LEFT JOIN ministries m ON f.ministry_id = m.id
        WHERE f.id = $1`,
       [formId]
     );
@@ -481,19 +542,10 @@ router.post('/:id/approve', validateApproval, async (req, res) => {
       return res.status(404).json({ error: 'Form not found' });
     }
 
-    const { status: currentStatus, pillar_id: assignedPillarId } = formResult.rows[0];
+    const { status: currentStatus } = formResult.rows[0];
 
-    // Check if pillar is the correct one for this ministry
-    if (role === 'pillar' && currentStatus === 'pending_pillar') {
-      if (assignedPillarId !== userId) {
-        return res.status(403).json({ 
-          error: 'This form is assigned to a different pillar' 
-        });
-      }
-    }
-
-    // Standard approval check
-    const approveCheck = await canApproveForm(pool, role, formId);
+    // Standard approval check (includes affiliated ministry check for pillars)
+    const approveCheck = await canApproveForm(pool, userId, role, formId);
     if (!approveCheck.allowed) {
       return res.status(403).json({ error: approveCheck.reason });
     }
@@ -574,6 +626,342 @@ router.post('/:id/approve', validateApproval, async (req, res) => {
   } catch (error) {
     console.error('Approve/reject form error:', error);
     res.status(500).json({ error: 'Server error processing approval' });
+  }
+});
+
+// ============================================
+// POST /api/forms/:id/revoke - Pillar/Pastor revoke their own decision
+// ============================================
+router.post('/:id/revoke', async (req, res) => {
+  try {
+    const formId = parseInt(req.params.id);
+    const { id: userId, role } = req.user;
+
+    // Admin, pillar, and pastor can revoke decisions
+    if (role !== 'admin' && role !== 'pillar' && role !== 'pastor') {
+      return res.status(403).json({ error: 'Only admin, pillar, and pastor users can revoke decisions' });
+    }
+
+    // Get form details
+    const formResult = await pool.query(
+      `SELECT mf.status, mf.form_number, mf.ministry_id, m.name as ministry_name 
+       FROM ministry_forms mf
+       LEFT JOIN ministries m ON mf.ministry_id = m.id
+       WHERE mf.id = $1`,
+      [formId]
+    );
+
+    if (formResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Form not found' });
+    }
+
+    const { status, form_number, ministry_id, ministry_name } = formResult.rows[0];
+
+    // Handle admin revoke - can revoke any form at any status (except draft)
+    if (role === 'admin') {
+      if (status === 'draft') {
+        return res.status(400).json({ error: 'Cannot revoke a draft form' });
+      }
+      
+      // Reset form to pending_pillar status
+      await pool.query(
+        `UPDATE ministry_forms 
+         SET status = 'pending_pillar',
+             current_approver_role = 'pillar',
+             pillar_approved_at = NULL,
+             pastor_approved_at = NULL,
+             rejection_reason = NULL,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1`,
+        [formId]
+      );
+
+      // Delete all approval records
+      await pool.query(
+        'DELETE FROM approvals WHERE form_id = $1',
+        [formId]
+      );
+
+      // Notify all pillar users
+      const pillarResult = await pool.query(
+        `SELECT id FROM users WHERE role = 'pillar' AND active = true`
+      );
+
+      for (const pillar of pillarResult.rows) {
+        try {
+          await pool.query(
+            `INSERT INTO notifications (user_id, form_id, type, title, message)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (user_id, form_id, type) DO UPDATE
+             SET message = EXCLUDED.message, is_read = FALSE, created_at = CURRENT_TIMESTAMP`,
+            [
+              pillar.id,
+              formId,
+              'decision_revoked',
+              'Decision Revoked by Admin',
+              `Admin revoked decision for Form ${form_number} (${ministry_name}). Please review again.`
+            ]
+          );
+        } catch (notifError) {
+          console.error('Failed to create notification:', notifError);
+        }
+      }
+
+      // Log audit
+      await pool.query(
+        'INSERT INTO audit_log (form_id, user_id, action, details) VALUES ($1, $2, $3, $4)',
+        [formId, userId, 'admin_decision_revoked', `Admin revoked decision for form ${form_number}`]
+      );
+
+      res.json({ 
+        message: 'Decision revoked successfully. Form reset to pending pillar approval.',
+        newStatus: 'pending_pillar'
+      });
+      return;
+    }
+    
+    // Handle pillar revoke
+    if (role === 'pillar') {
+      // Pillar can revoke any form (except draft)
+      if (status === 'draft') {
+        return res.status(400).json({ error: 'Cannot revoke a draft form' });
+      }
+
+      // Reset form to pending_pillar status
+      await pool.query(
+        `UPDATE ministry_forms 
+         SET status = 'pending_pillar',
+             current_approver_role = 'pillar',
+             pillar_approved_at = NULL,
+             pastor_approved_at = NULL,
+             rejection_reason = NULL,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1`,
+        [formId]
+      );
+
+      // Delete the pillar approval/rejection record
+      await pool.query(
+        'DELETE FROM approvals WHERE form_id = $1 AND role = $2',
+        [formId, 'pillar']
+      );
+
+      // Delete pastor approval if exists
+      await pool.query(
+        'DELETE FROM approvals WHERE form_id = $1 AND role = $2',
+        [formId, 'pastor']
+      );
+
+      // Notify all pillar users
+      const pillarResult = await pool.query(
+        `SELECT id FROM users WHERE role = 'pillar' AND active = true`
+      );
+
+      for (const pillar of pillarResult.rows) {
+        try {
+          await pool.query(
+            `INSERT INTO notifications (user_id, form_id, type, title, message)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (user_id, form_id, type) DO UPDATE
+             SET message = EXCLUDED.message, is_read = FALSE, created_at = CURRENT_TIMESTAMP`,
+            [
+              pillar.id,
+              formId,
+              'decision_revoked',
+              'Decision Revoked',
+              `Pillar decision for Form ${form_number} (${ministry_name}) has been revoked. Please review again.`
+            ]
+          );
+        } catch (notifError) {
+          console.error('Failed to create notification:', notifError);
+        }
+      }
+
+      // Log audit
+      await pool.query(
+        'INSERT INTO audit_log (form_id, user_id, action, details) VALUES ($1, $2, $3, $4)',
+        [formId, userId, 'pillar_decision_revoked', `Pillar revoked their decision for form ${form_number}`]
+      );
+
+      res.json({ 
+        message: 'Decision revoked successfully. Form reset to pending pillar approval.',
+        newStatus: 'pending_pillar'
+      });
+    }
+    // Handle pastor revoke
+    else if (role === 'pastor') {
+      // Pastor can revoke any form (except draft and pending_pillar)
+      if (status === 'draft' || status === 'pending_pillar') {
+        return res.status(400).json({ error: 'Cannot revoke forms in draft or pending pillar status' });
+      }
+
+      // Reset form to pending_pastor status
+      await pool.query(
+        `UPDATE ministry_forms 
+         SET status = 'pending_pastor',
+             current_approver_role = 'pastor',
+             pastor_approved_at = NULL,
+             rejection_reason = NULL,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1`,
+        [formId]
+      );
+
+      // Delete the pastor approval/rejection record
+      await pool.query(
+        'DELETE FROM approvals WHERE form_id = $1 AND role = $2',
+        [formId, 'pastor']
+      );
+
+      // Notify all pastor users
+      const pastorResult = await pool.query(
+        `SELECT id FROM users WHERE role = 'pastor' AND active = true`
+      );
+
+      for (const pastor of pastorResult.rows) {
+        try {
+          await pool.query(
+            `INSERT INTO notifications (user_id, form_id, type, title, message)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (user_id, form_id, type) DO UPDATE
+             SET message = EXCLUDED.message, is_read = FALSE, created_at = CURRENT_TIMESTAMP`,
+            [
+              pastor.id,
+              formId,
+              'decision_revoked',
+              'Decision Revoked',
+              `Pastor decision for Form ${form_number} (${ministry_name}) has been revoked. Please review again.`
+            ]
+          );
+        } catch (notifError) {
+          console.error('Failed to create notification:', notifError);
+        }
+      }
+
+      // Log audit
+      await pool.query(
+        'INSERT INTO audit_log (form_id, user_id, action, details) VALUES ($1, $2, $3, $4)',
+        [formId, userId, 'pastor_decision_revoked', `Pastor revoked their decision for form ${form_number}`]
+      );
+
+      res.json({ 
+        message: 'Decision revoked successfully. Form reset to pending pastor approval.',
+        newStatus: 'pending_pastor'
+      });
+    }
+
+  } catch (error) {
+    console.error('Revoke approval error:', error);
+    res.status(500).json({ error: 'Server error revoking decision' });
+  }
+});
+
+// ============================================
+// POST /api/forms/:id/query - Pastor raise query
+// ============================================
+router.post('/:id/query', async (req, res) => {
+  try {
+    const formId = parseInt(req.params.id);
+    const { description } = req.body;
+    const { id: userId, role } = req.user;
+
+    // Only pastors can raise queries
+    if (role !== 'pastor') {
+      return res.status(403).json({ error: 'Only pastors can raise queries' });
+    }
+
+    if (!description || description.trim().length === 0) {
+      return res.status(400).json({ error: 'Query description is required' });
+    }
+
+    // Get form details
+    const formResult = await pool.query(
+      `SELECT mf.status, mf.form_number, mf.ministry_id, m.name as ministry_name, u.name as pastor_name
+       FROM ministry_forms mf
+       LEFT JOIN ministries m ON mf.ministry_id = m.id
+       LEFT JOIN users u ON u.id = $2
+       WHERE mf.id = $1`,
+      [formId, userId]
+    );
+
+    if (formResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Form not found' });
+    }
+
+    const { status, form_number, ministry_id, ministry_name, pastor_name } = formResult.rows[0];
+
+    // Automatically revoke if form is approved or pending pastor
+    let needsRevoke = false;
+    if (status === 'pending_pastor' || status === 'approved' || status === 'rejected') {
+      needsRevoke = true;
+
+      // Reset form to pending_pillar status
+      await pool.query(
+        `UPDATE ministry_forms 
+         SET status = 'pending_pillar',
+             current_approver_role = 'pillar',
+             pillar_approved_at = NULL,
+             pastor_approved_at = NULL,
+             rejection_reason = NULL,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1`,
+        [formId]
+      );
+
+      // Delete approval records
+      await pool.query(
+        'DELETE FROM approvals WHERE form_id = $1',
+        [formId]
+      );
+    }
+
+    // Find all pillar users for this ministry (affiliated or general)
+    const pillarResult = await pool.query(
+      `SELECT id, name, email 
+       FROM users 
+       WHERE role = 'pillar' 
+       AND active = true
+`,
+      []
+    );
+
+    // Create notifications for pillar users
+    for (const pillar of pillarResult.rows) {
+      try {
+        await pool.query(
+          `INSERT INTO notifications (user_id, form_id, type, title, message)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (user_id, form_id, type) DO UPDATE
+           SET message = EXCLUDED.message, is_read = FALSE, created_at = CURRENT_TIMESTAMP`,
+          [
+            pillar.id,
+            formId,
+            'pastor_query',
+            'Pastor Query on Form',
+            `${pastor_name} raised a query on Form ${form_number} (${ministry_name}): "${description.substring(0, 200)}${description.length > 200 ? '...' : ''}"`
+          ]
+        );
+      } catch (notifError) {
+        console.error(`Failed to create notification for pillar ${pillar.id}:`, notifError);
+      }
+    }
+
+    // Log audit
+    await pool.query(
+      'INSERT INTO audit_log (form_id, user_id, action, details) VALUES ($1, $2, $3, $4)',
+      [formId, userId, 'pastor_query', `Pastor raised query: ${description}`]
+    );
+
+    res.json({ 
+      message: 'Query sent successfully to pillar leaders',
+      revoked: needsRevoke,
+      newStatus: needsRevoke ? 'pending_pillar' : status,
+      notifiedPillars: pillarResult.rows.length
+    });
+
+  } catch (error) {
+    console.error('Pastor query error:', error);
+    res.status(500).json({ error: 'Server error raising query' });
   }
 });
 

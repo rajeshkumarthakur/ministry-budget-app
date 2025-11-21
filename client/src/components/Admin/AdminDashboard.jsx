@@ -72,16 +72,6 @@ const AdminDashboard = () => {
       borderColor: 'hover:border-green-300',
       path: '/admin/event-types',
       stat: stats?.totalEventTypes || 0
-    },
-    {
-      title: 'System Settings',
-      description: 'Configure system-wide settings and preferences',
-      icon: Settings,
-      iconBg: 'bg-gray-100',
-      iconColor: 'text-gray-700',
-      borderColor: 'hover:border-gray-300',
-      path: '/admin/settings',
-      stat: null
     }
   ];
 
@@ -159,7 +149,7 @@ const AdminDashboard = () => {
         {/* Quick Actions */}
         <div>
           <h2 className="text-xl font-bold text-gray-900 mb-4">Quick Actions</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
             {quickActions.map((action) => {
               const Icon = action.icon;
               return (
@@ -228,32 +218,6 @@ const AdminDashboard = () => {
           </div>
         )}
 
-        {/* System Health */}
-        <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="bg-white rounded-lg shadow-sm p-6">
-            <div className="flex items-center space-x-3 mb-3">
-              <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-              <h3 className="font-semibold text-gray-900">System Status</h3>
-            </div>
-            <p className="text-sm text-gray-600">All systems operational</p>
-          </div>
-
-          <div className="bg-white rounded-lg shadow-sm p-6">
-            <div className="flex items-center space-x-3 mb-3">
-              <Users className="w-5 h-5 text-gray-400" />
-              <h3 className="font-semibold text-gray-900">Active Users</h3>
-            </div>
-            <p className="text-2xl font-bold text-gray-900">{stats?.activeUsers || 0}</p>
-          </div>
-
-          <div className="bg-white rounded-lg shadow-sm p-6">
-            <div className="flex items-center space-x-3 mb-3">
-              <Building2 className="w-5 h-5 text-gray-400" />
-              <h3 className="font-semibold text-gray-900">Active Ministries</h3>
-            </div>
-            <p className="text-2xl font-bold text-gray-900">{stats?.activeMinistries || 0}</p>
-          </div>
-        </div>
       </div>
     </div>
   );

@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { formsService } from '../../services/forms';
 import Header from '../Common/Header';
+import DeleteConfirmationModal from '../Common/DeleteConfirmationModal';
 import { 
   FileText, 
   Clock, 
@@ -15,7 +16,9 @@ import {
   Eye,
   Edit,
   Calendar,
-  User
+  User,
+  Trash2,
+  Filter
 } from 'lucide-react';
 
 const StatusBadge = ({ status }) => {
@@ -41,6 +44,10 @@ const FormsList = () => {
   const [forms, setForms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState('grid'); // 'list' or 'grid'
+  const [showPendingOnly, setShowPendingOnly] = useState(false); // Filter for pillar users
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [formToDelete, setFormToDelete] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const navigate = useNavigate();
   const { user } = useAuth();
 
@@ -61,16 +68,87 @@ const FormsList = () => {
   };
 
   const canEdit = (form) => {
+    // Admin can edit any form at any time
     if (user.role === 'admin') return true;
-    if (user.role === 'ministry_leader' && form.status === 'draft') return true;
+    
+    // Ministry leader can only edit forms from ministries they lead
+    if (user.role === 'ministry_leader') {
+      return form.ministry_leader_id === user.id;
+    }
+    
+    // Pillar can only edit forms from ministries they're assigned to
+    if (user.role === 'pillar') {
+      // Check if pillar is assigned to this ministry
+      if (form.assigned_pillars && Array.isArray(form.assigned_pillars) && form.assigned_pillars.length > 0) {
+        return form.assigned_pillars.includes(user.id);
+      }
+      // If no assigned pillars for the ministry, don't allow editing
+      return false;
+    }
+    
+    // Pastor can edit any form at any time
+    if (user.role === 'pastor') return true;
+    
     return false;
   };
 
+  const canDelete = (form) => {
+    // Admin can delete any form
+    if (user.role === 'admin') return true;
+    // Ministry leader can delete their own draft forms only
+    if (user.role === 'ministry_leader' && form.status === 'draft' && form.ministry_leader_id === user.id) return true;
+    return false;
+  };
+
+  const canView = (form) => {
+    // Everyone can view forms
+    return true;
+  };
+
   const needsMyApproval = (form) => {
+    // Pillar can approve forms pending pillar approval
     if (user.role === 'pillar' && form.status === 'pending_pillar') return true;
+    // Pastor can review forms pending pastor approval
     if (user.role === 'pastor' && form.status === 'pending_pastor') return true;
     return false;
   };
+
+  const canQuery = (form) => {
+    // Only pastor can query any form
+    if (user.role === 'pastor') return true;
+    return false;
+  };
+
+  const handleDeleteClick = (form) => {
+    setFormToDelete(form);
+    setDeleteModalOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    try {
+      setIsDeleting(true);
+      await formsService.deleteForm(formToDelete.id);
+      setDeleteModalOpen(false);
+      setFormToDelete(null);
+      // Reload forms
+      await loadForms();
+    } catch (error) {
+      console.error('Error deleting form:', error);
+      alert(error.response?.data?.error || 'Failed to delete form');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  // Filter forms based on toggle for pillar users
+  const getFilteredForms = () => {
+    if (showPendingOnly && (user.role === 'pillar' || user.role === 'pastor')) {
+      return forms.filter(needsMyApproval);
+    }
+    return forms;
+  };
+
+  const filteredForms = getFilteredForms();
 
   if (loading) {
     return (
@@ -96,9 +174,27 @@ const FormsList = () => {
             <h1 className="text-3xl font-bold text-gray-900">All Forms</h1>
             <p className="text-gray-600 mt-1">
               View and manage all ministry budget forms
+              {showPendingOnly && (user.role === 'pillar' || user.role === 'pastor') && 
+                ` (Showing only forms pending your approval)`}
             </p>
           </div>
           <div className="flex items-center gap-3">
+            {/* Filter Toggle for Pillar/Pastor */}
+            {(user.role === 'pillar' || user.role === 'pastor') && (
+              <button
+                onClick={() => setShowPendingOnly(!showPendingOnly)}
+                className={`px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition-colors ${
+                  showPendingOnly
+                    ? 'bg-purple-600 text-white hover:bg-purple-700'
+                    : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+                }`}
+                title={showPendingOnly ? 'Show All Forms' : 'Show Pending Approval Only'}
+              >
+                <Filter size={18} />
+                <span>{showPendingOnly ? 'Pending Only' : 'All Forms'}</span>
+              </button>
+            )}
+
             {/* View Mode Toggle */}
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-1 flex">
               <button
@@ -139,7 +235,7 @@ const FormsList = () => {
         </div>
 
         {/* Forms Display */}
-        {forms.length === 0 ? (
+        {filteredForms.length === 0 ? (
           <div className="bg-white rounded-lg shadow-sm p-12 text-center">
             <FileText size={48} className="text-gray-300 mx-auto mb-4" />
             <p className="text-gray-600 mb-4">No forms found</p>
@@ -181,7 +277,7 @@ const FormsList = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {forms.map((form) => (
+                  {filteredForms.map((form) => (
                     <tr
                       key={form.id}
                       className={`${
@@ -205,13 +301,29 @@ const FormsList = () => {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => navigate(`/forms/${form.id}/view`)}
-                            className="flex items-center gap-1 px-3 py-1 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
-                          >
-                            <Eye size={16} />
-                            <span>View</span>
-                          </button>
+                          {/* Pillar: Only Approve/Reject buttons */}
+                          {user.role === 'pillar' && needsMyApproval(form) && (
+                            <button
+                              onClick={() => navigate(`/forms/${form.id}/view`)}
+                              className="flex items-center gap-1 px-3 py-1 text-sm text-green-600 hover:text-green-800 hover:bg-green-50 rounded transition-colors"
+                            >
+                              <CheckCircle size={16} />
+                              <span>Review</span>
+                            </button>
+                          )}
+
+                          {/* Pastor, Ministry Leader, Admin: View button */}
+                          {(user.role === 'pastor' || user.role === 'ministry_leader' || user.role === 'admin') && (
+                            <button
+                              onClick={() => navigate(`/forms/${form.id}/view`)}
+                              className="flex items-center gap-1 px-3 py-1 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+                            >
+                              <Eye size={16} />
+                              <span>View</span>
+                            </button>
+                          )}
+
+                          {/* Edit button (Admin and Ministry Leader for own drafts) */}
                           {canEdit(form) && (
                             <button
                               onClick={() => navigate(`/forms/${form.id}/edit`)}
@@ -221,13 +333,15 @@ const FormsList = () => {
                               <span>Edit</span>
                             </button>
                           )}
-                          {needsMyApproval(form) && (
+
+                          {/* Delete button (Admin and Ministry Leader for own drafts) */}
+                          {canDelete(form) && (
                             <button
-                              onClick={() => navigate(`/forms/${form.id}/approve`)}
-                              className="flex items-center gap-1 px-3 py-1 text-sm text-green-600 hover:text-green-800 hover:bg-green-50 rounded transition-colors"
+                              onClick={() => handleDeleteClick(form)}
+                              className="flex items-center gap-1 px-3 py-1 text-sm text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors"
                             >
-                              <CheckCircle size={16} />
-                              <span>Review</span>
+                              <Trash2 size={16} />
+                              <span>Delete</span>
                             </button>
                           )}
                         </div>
@@ -241,7 +355,7 @@ const FormsList = () => {
         ) : (
           // Grid View
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {forms.map((form) => (
+            {filteredForms.map((form) => (
               <div
                 key={form.id}
                 className={`bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow ${
@@ -276,13 +390,29 @@ const FormsList = () => {
 
                   {/* Actions */}
                   <div className="flex items-center gap-2 pt-4 border-t border-gray-200">
-                    <button
-                      onClick={() => navigate(`/forms/${form.id}/view`)}
-                      className="flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-                    >
-                      <Eye size={16} />
-                      <span>View</span>
-                    </button>
+                    {/* Pillar: Only Approve/Reject button */}
+                    {user.role === 'pillar' && needsMyApproval(form) && (
+                      <button
+                        onClick={() => navigate(`/forms/${form.id}/view`)}
+                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors"
+                      >
+                        <CheckCircle size={16} />
+                        <span>Review</span>
+                      </button>
+                    )}
+
+                    {/* Pastor, Ministry Leader, Admin: View button */}
+                    {(user.role === 'pastor' || user.role === 'ministry_leader' || user.role === 'admin') && (
+                      <button
+                        onClick={() => navigate(`/forms/${form.id}/view`)}
+                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                      >
+                        <Eye size={16} />
+                        <span>View</span>
+                      </button>
+                    )}
+
+                    {/* Edit button (Admin and Ministry Leader for own drafts) */}
                     {canEdit(form) && (
                       <button
                         onClick={() => navigate(`/forms/${form.id}/edit`)}
@@ -292,13 +422,15 @@ const FormsList = () => {
                         <span>Edit</span>
                       </button>
                     )}
-                    {needsMyApproval(form) && (
+
+                    {/* Delete button (Admin and Ministry Leader for own drafts) */}
+                    {canDelete(form) && (
                       <button
-                        onClick={() => navigate(`/forms/${form.id}/approve`)}
-                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors"
+                        onClick={() => handleDeleteClick(form)}
+                        className="flex items-center justify-center gap-2 px-3 py-2 text-sm text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
+                        title="Delete Form"
                       >
-                        <CheckCircle size={16} />
-                        <span>Review</span>
+                        <Trash2 size={16} />
                       </button>
                     )}
                   </div>
@@ -315,11 +447,27 @@ const FormsList = () => {
         )}
 
         {/* Forms Count */}
-        {forms.length > 0 && (
+        {filteredForms.length > 0 && (
           <div className="mt-6 text-center text-sm text-gray-600">
-            Showing {forms.length} form{forms.length !== 1 ? 's' : ''}
+            Showing {filteredForms.length} form{filteredForms.length !== 1 ? 's' : ''}
+            {showPendingOnly && forms.length > filteredForms.length && 
+              ` (${forms.length} total)`}
           </div>
         )}
+
+        {/* Delete Confirmation Modal */}
+        <DeleteConfirmationModal
+          isOpen={deleteModalOpen}
+          onClose={() => {
+            setDeleteModalOpen(false);
+            setFormToDelete(null);
+          }}
+          onConfirm={handleDeleteConfirm}
+          title="Delete Form"
+          message="Are you sure you want to delete this form? This action cannot be undone."
+          itemName={formToDelete ? `Form #${formToDelete.form_number} - ${formToDelete.ministry_name}` : ''}
+          isDeleting={isDeleting}
+        />
       </div>
     </div>
   );

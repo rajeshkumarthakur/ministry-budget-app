@@ -20,7 +20,7 @@ export default defineConfig({
     open: false, // Don't auto-open browser
     proxy: {
       '/api': {
-        target: process.env.VITE_API_URL || 'http://localhost:3001',
+        target:'http://localhost:3001',//https://artisyscorporation.sharepoint.com/:v:/r/sites/synapseai/Shared%20Documents/DevOps/ComplyForm/Demos%20and%20Prototypes/ComplianceOpportunitiesSection.mp4?csf=1&web=1&e=uzclm7
         changeOrigin: true,
         rewrite: (path) => path,
       }

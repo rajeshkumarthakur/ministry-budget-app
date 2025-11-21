@@ -9,6 +9,7 @@ const AdminMinistries = () => {
   const navigate = useNavigate();
   const [ministries, setMinistries] = useState([]);
   const [pillars, setPillars] = useState([]);
+  const [ministryLeaders, setMinistryLeaders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingMinistry, setEditingMinistry] = useState(null);
@@ -17,7 +18,8 @@ const AdminMinistries = () => {
 
   const [formData, setFormData] = useState({
     name: '',
-    pillar_id: '',
+    assigned_pillars: [],
+    ministry_leader_id: '',
     description: '',
     active: true
   });
@@ -29,12 +31,17 @@ const AdminMinistries = () => {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [ministriesData, pillarsData] = await Promise.all([
+      const [ministriesData, usersData] = await Promise.all([
         adminService.getMinistries(),
-        adminService.getPillars()
+        adminService.getUsers()
       ]);
       setMinistries(ministriesData);
-      setPillars(pillarsData);
+      // Filter out admins for both dropdowns - show all active users except admins
+      const nonAdminUsers = usersData.filter(u => u.role !== 'admin' && u.active);
+      setPillars(nonAdminUsers);
+      setMinistryLeaders(nonAdminUsers);
+      console.log('All users:', usersData.map(u => ({ id: u.id, name: u.full_name, role: u.role })));
+      console.log('Non-admin users for dropdowns:', nonAdminUsers.map(u => ({ id: u.id, name: u.full_name, role: u.role })));
     } catch (error) {
       console.error('Error loading data:', error);
       setError('Failed to load ministries');
@@ -47,7 +54,8 @@ const AdminMinistries = () => {
     setEditingMinistry(null);
     setFormData({
       name: '',
-      pillar_id: '',
+      assigned_pillars: [],
+      ministry_leader_id: '',
       description: '',
       active: true
     });
@@ -58,7 +66,8 @@ const AdminMinistries = () => {
     setEditingMinistry(ministry);
     setFormData({
       name: ministry.name,
-      pillar_id: ministry.pillar_id || '',
+      assigned_pillars: ministry.assigned_pillars || [],
+      ministry_leader_id: ministry.ministry_leader_id || '',
       description: ministry.description || '',
       active: ministry.active
     });
@@ -84,16 +93,31 @@ const AdminMinistries = () => {
     setError('');
 
     try {
+      // Clean up the data before sending
+      const dataToSend = {
+        ...formData,
+        // Filter out empty pillar selections and convert to integers
+        assigned_pillars: formData.assigned_pillars
+          .filter(id => id !== '' && id !== null)
+          .map(id => parseInt(id)),
+        // Convert ministry_leader_id to integer or null
+        ministry_leader_id: formData.ministry_leader_id 
+          ? parseInt(formData.ministry_leader_id) 
+          : null
+      };
+
+      console.log('Submitting ministry data:', dataToSend);
+
       if (editingMinistry) {
-        await adminService.updateMinistry(editingMinistry.id, formData);
+        await adminService.updateMinistry(editingMinistry.id, dataToSend);
       } else {
-        await adminService.createMinistry(formData);
+        await adminService.createMinistry(dataToSend);
       }
       await loadData();
       setShowModal(false);
     } catch (error) {
       console.error('Error saving ministry:', error);
-      setError(error.response?.data?.message || 'Failed to save ministry');
+      setError(error.response?.data?.error || error.response?.data?.message || 'Failed to save ministry');
     }
   };
 
@@ -105,6 +129,39 @@ const AdminMinistries = () => {
   const getPillarName = (pillarId) => {
     const pillar = pillars.find(p => p.id === pillarId);
     return pillar ? pillar.full_name : 'Not assigned';
+  };
+
+  const getRoleLabel = (role) => {
+    const roleLabels = {
+      'ministry_leader': 'Ministry Leader',
+      'pillar': 'Pillar Leader',
+      'pastor': 'Pastor',
+      'admin': 'Administrator'
+    };
+    return roleLabels[role] || role;
+  };
+
+  const addPillarField = () => {
+    setFormData({ ...formData, assigned_pillars: [...formData.assigned_pillars, ''] });
+  };
+
+  const removePillarField = (index) => {
+    const newPillars = formData.assigned_pillars.filter((_, i) => i !== index);
+    setFormData({ ...formData, assigned_pillars: newPillars });
+  };
+
+  const updatePillarField = (index, value) => {
+    const newPillars = [...formData.assigned_pillars];
+    newPillars[index] = parseInt(value) || '';
+    setFormData({ ...formData, assigned_pillars: newPillars });
+  };
+
+  const getAvailablePillars = (currentIndex) => {
+    // Filter out already selected pillars (except the current one)
+    const selectedIds = formData.assigned_pillars
+      .filter((id, idx) => idx !== currentIndex && id !== '')
+      .map(id => parseInt(id));
+    return pillars.filter(p => !selectedIds.includes(p.id));
   };
 
   if (loading) {
@@ -136,7 +193,7 @@ const AdminMinistries = () => {
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Manage Ministries</h1>
               <p className="text-gray-500 mt-1">
-                Add, edit, and assign pillar leaders to ministries
+                Add, edit, and assign pillars and leaders to ministries
               </p>
             </div>
             <button
@@ -157,7 +214,7 @@ const AdminMinistries = () => {
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search ministries or pillar leaders..."
+              placeholder="Search ministries or leaders..."
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-church-primary focus:border-transparent"
             />
           </div>
@@ -176,9 +233,9 @@ const AdminMinistries = () => {
             </div>
           </div>
           <div className="bg-white rounded-lg shadow-sm p-6">
-            <div className="text-sm font-medium text-gray-600">With Assigned Pillar</div>
+            <div className="text-sm font-medium text-gray-600">With Assigned Pillars</div>
             <div className="text-3xl font-bold text-blue-600 mt-2">
-              {ministries.filter(m => m.pillar_id).length}
+              {ministries.filter(m => m.assigned_pillars && m.assigned_pillars.length > 0).length}
             </div>
           </div>
         </div>
@@ -209,7 +266,10 @@ const AdminMinistries = () => {
                       Ministry Name
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Assigned Pillar
+                      Assigned Pillars
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Ministry Leader
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Description
@@ -236,8 +296,24 @@ const AdminMinistries = () => {
                       <td className="px-6 py-4">
                         <div className="flex items-center text-sm">
                           <User className="w-4 h-4 text-gray-400 mr-2" />
-                          <span className={ministry.pillar_id ? 'text-gray-900' : 'text-gray-400'}>
-                            {ministry.pillar_name || 'Not assigned'}
+                          {ministry.assigned_pillar_details && ministry.assigned_pillar_details.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {ministry.assigned_pillar_details.map((pillar, idx) => (
+                                <span key={pillar.id} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                  {pillar.name}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-gray-400">Not assigned</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center text-sm">
+                          <User className="w-4 h-4 text-gray-400 mr-2" />
+                          <span className={ministry.ministry_leader_id ? 'text-gray-900' : 'text-gray-400'}>
+                            {ministry.ministry_leader_name || 'Not assigned'}
                           </span>
                         </div>
                       </td>
@@ -312,22 +388,71 @@ const AdminMinistries = () => {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Assigned Pillar Leader
+                      Assigned Pillars
+                    </label>
+                    <div className="space-y-3">
+                      {formData.assigned_pillars.length === 0 ? (
+                        <div className="text-sm text-gray-500 italic mb-2">
+                          No pillars assigned yet
+                        </div>
+                      ) : (
+                        formData.assigned_pillars.map((pillarId, index) => (
+                          <div key={index} className="flex items-center gap-2">
+                            <select
+                              value={pillarId}
+                              onChange={(e) => updatePillarField(index, e.target.value)}
+                              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-church-primary focus:border-transparent"
+                            >
+                              <option value="">Select Pillar</option>
+                              {getAvailablePillars(index).map((user) => (
+                                <option key={user.id} value={user.id}>
+                                  {user.full_name} ({getRoleLabel(user.role)})
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              onClick={() => removePillarField(index)}
+                              className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
+                              title="Remove pillar"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ))
+                      )}
+                      <button
+                        type="button"
+                        onClick={addPillarField}
+                        className="flex items-center gap-2 px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded-lg border border-blue-200 hover:border-blue-300 transition-colors"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>Assign more pillars</span>
+                      </button>
+                    </div>
+                    <p className="mt-2 text-sm text-gray-500">
+                      Forms from this ministry will be routed to these pillars for approval
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Ministry Leader
                     </label>
                     <select
-                      value={formData.pillar_id}
-                      onChange={(e) => setFormData({ ...formData, pillar_id: e.target.value })}
+                      value={formData.ministry_leader_id}
+                      onChange={(e) => setFormData({ ...formData, ministry_leader_id: e.target.value })}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-church-primary focus:border-transparent"
                     >
-                      <option value="">Not assigned</option>
-                      {pillars.map((pillar) => (
-                        <option key={pillar.id} value={pillar.id}>
-                          {pillar.full_name}
+                      <option value="">Select Ministry Leader (Optional)</option>
+                      {ministryLeaders.map((leader) => (
+                        <option key={leader.id} value={leader.id}>
+                          {leader.full_name} ({getRoleLabel(leader.role)})
                         </option>
                       ))}
                     </select>
                     <p className="mt-1 text-sm text-gray-500">
-                      Forms from this ministry will be routed to this pillar for approval
+                      Assign a ministry leader to this ministry
                     </p>
                   </div>
 

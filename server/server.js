@@ -269,6 +269,7 @@ const goalsModule = require('./routes/goals');
 const adminModule = require('./routes/admin');
 const lovModule = require('./routes/lov');
 const exportRoutes = require('./routes/export-routes');
+const notificationsModule = require('./routes/notifications');
 
 formsModule.initializeRouter(pool);
 eventsModule.initializeRouter(pool);
@@ -276,6 +277,7 @@ goalsModule.initializeRouter(pool);
 adminModule.initializeRouter(pool);
 lovModule.initializeRouter(pool);
 exportRoutes.initializeRouter(pool);
+notificationsModule.initializeRouter(pool);
 
 // Mount routes
 app.use('/api/forms', authenticateToken, formsModule.router);
@@ -284,6 +286,7 @@ app.use('/api/forms', authenticateToken, goalsModule.router);
 app.use('/api/forms', authenticateToken, exportRoutes.router);
 app.use('/api/admin', authenticateToken, authorizeRole('admin'), adminModule.router);
 app.use('/api/lov', authenticateToken, lovModule.router);
+app.use('/api/notifications', authenticateToken, notificationsModule.router);
 
 // ============================================
 // Dashboard Stats
@@ -299,8 +302,9 @@ app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
       whereClause = 'WHERE f.ministry_leader_id = $1';
       params = [userId];
     } else if (role === 'pillar') {
-      whereClause = 'WHERE m.pillar_id = $1';
-      params = [userId];
+      // Pillars see all submitted forms
+      whereClause = 'WHERE f.status NOT IN (\'draft\')';
+      params = [];
     }
 
     const query = `

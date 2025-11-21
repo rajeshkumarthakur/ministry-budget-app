@@ -116,15 +116,21 @@ router.get('/ministries', async (req, res) => {
       `SELECT 
         m.id,
         m.name,
-        m.pillar_id,
+        m.ministry_leader_id,
+        m.assigned_pillars,
         m.description,
         m.active,
         m.created_at,
         m.updated_at,
-        u.name as pillar_name,
-        u.email as pillar_email
+        ml.name as ministry_leader_name,
+        ml.email as ministry_leader_email,
+        (
+          SELECT json_agg(json_build_object('id', u.id, 'name', u.name, 'email', u.email))
+          FROM users u
+          WHERE u.id = ANY(m.assigned_pillars)
+        ) as assigned_pillar_details
       FROM ministries m
-      LEFT JOIN users u ON m.pillar_id = u.id
+      LEFT JOIN users ml ON m.ministry_leader_id = ml.id
       ORDER BY m.name`
     );
     res.json(result.rows);
@@ -137,28 +143,44 @@ router.get('/ministries', async (req, res) => {
 // POST /api/admin/ministries - Create new ministry
 router.post('/ministries', async (req, res) => {
   try {
-    const { name, pillar_id, description } = req.body;
+    const { name, ministry_leader_id, assigned_pillars, description } = req.body;
 
     if (!name || name.trim().length === 0) {
       return res.status(400).json({ error: 'Ministry name is required' });
     }
 
-    // Verify pillar exists
-    if (pillar_id) {
-      const pillarCheck = await pool.query(
-        "SELECT id FROM users WHERE id = $1 AND role = 'pillar'",
-        [pillar_id]
+    // Verify ministry leader exists if provided
+    if (ministry_leader_id) {
+      const leaderCheck = await pool.query(
+        "SELECT id, role FROM users WHERE id = $1",
+        [ministry_leader_id]
       );
-      if (pillarCheck.rows.length === 0) {
-        return res.status(400).json({ error: 'Invalid pillar ID' });
+      if (leaderCheck.rows.length === 0) {
+        return res.status(400).json({ error: 'Invalid ministry leader ID' });
+      }
+    }
+
+    // Verify assigned pillars exist if provided
+    if (assigned_pillars && assigned_pillars.length > 0) {
+      const pillarsCheck = await pool.query(
+        'SELECT id FROM users WHERE id = ANY($1) AND role != $2 AND active = true',
+        [assigned_pillars, 'admin']
+      );
+      if (pillarsCheck.rows.length !== assigned_pillars.length) {
+        return res.status(400).json({ error: 'Some assigned pillar IDs are invalid' });
       }
     }
 
     const result = await pool.query(
-      `INSERT INTO ministries (name, pillar_id, description)
-       VALUES ($1, $2, $3)
+      `INSERT INTO ministries (name, ministry_leader_id, assigned_pillars, description)
+       VALUES ($1, $2, $3, $4)
        RETURNING *`,
-      [name.trim(), pillar_id || null, description || null]
+      [
+        name.trim(), 
+        ministry_leader_id || null, 
+        assigned_pillars || [],
+        description || null
+      ]
     );
 
     // Log audit
@@ -182,35 +204,51 @@ router.post('/ministries', async (req, res) => {
 router.put('/ministries/:id', async (req, res) => {
   try {
     const ministryId = parseInt(req.params.id);
-    const { name, pillar_id, description, active } = req.body;
+    const { name, ministry_leader_id, assigned_pillars, description, active } = req.body;
+
+    console.log('Update ministry request:', { ministryId, name, ministry_leader_id, assigned_pillars, description, active });
 
     if (!name || name.trim().length === 0) {
       return res.status(400).json({ error: 'Ministry name is required' });
     }
 
-    // Verify pillar exists if provided
-    if (pillar_id) {
-      const pillarCheck = await pool.query(
-        "SELECT id FROM users WHERE id = $1 AND role = 'pillar'",
-        [pillar_id]
+    // Verify ministry leader exists if provided
+    if (ministry_leader_id) {
+      const leaderCheck = await pool.query(
+        "SELECT id, role FROM users WHERE id = $1",
+        [ministry_leader_id]
       );
-      if (pillarCheck.rows.length === 0) {
-        return res.status(400).json({ error: 'Invalid pillar ID' });
+      console.log('Ministry leader check result:', leaderCheck.rows);
+      if (leaderCheck.rows.length === 0) {
+        return res.status(400).json({ error: 'Invalid ministry leader ID - user not found' });
+      }
+    }
+
+    // Verify assigned pillars exist if provided
+    if (assigned_pillars && assigned_pillars.length > 0) {
+      const pillarsCheck = await pool.query(
+        'SELECT id FROM users WHERE id = ANY($1) AND role != $2 AND active = true',
+        [assigned_pillars, 'admin']
+      );
+      if (pillarsCheck.rows.length !== assigned_pillars.length) {
+        return res.status(400).json({ error: 'Some assigned pillar IDs are invalid' });
       }
     }
 
     const result = await pool.query(
       `UPDATE ministries 
        SET name = $1,
-           pillar_id = $2,
-           description = $3,
-           active = $4,
+           ministry_leader_id = $2,
+           assigned_pillars = $3,
+           description = $4,
+           active = $5,
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $5
+       WHERE id = $6
        RETURNING *`,
       [
         name.trim(),
-        pillar_id || null,
+        ministry_leader_id || null,
+        assigned_pillars || [],
         description || null,
         active !== undefined ? active : true,
         ministryId
@@ -234,7 +272,8 @@ router.put('/ministries/:id', async (req, res) => {
       return res.status(409).json({ error: 'Ministry name already exists' });
     }
     console.error('Update ministry error:', error);
-    res.status(500).json({ error: 'Server error updating ministry' });
+    console.error('Error details:', error.message, error.code);
+    res.status(500).json({ error: 'Server error updating ministry: ' + error.message });
   }
 });
 
@@ -421,13 +460,22 @@ router.delete('/event-types/:id', async (req, res) => {
 // GET /api/admin/users - List all users
 router.get('/users', async (req, res) => {
   try {
+    // Get users with their ministries aggregated
     const result = await pool.query(
-      `SELECT id, name as full_name, email, 
-              CASE WHEN role = 'ministry_leader' THEN 'ministry' ELSE role END as role, 
-              active, created_at 
-       FROM users 
-       ORDER BY name`
+      `SELECT 
+        u.id, 
+        u.name as full_name, 
+        u.email, 
+        u.role, 
+        u.active, 
+        u.created_at,
+        STRING_AGG(DISTINCT m.name, ', ') FILTER (WHERE m.id IS NOT NULL) as ministries
+       FROM users u
+       LEFT JOIN ministries m ON m.ministry_leader_id = u.id
+       GROUP BY u.id, u.name, u.email, u.role, u.active, u.created_at
+       ORDER BY u.name`
     );
+
     res.json(result.rows);
   } catch (error) {
     console.error('Get users error:', error);
@@ -440,6 +488,8 @@ router.post('/users', async (req, res) => {
   try {
     const { full_name, email, role, pin, active } = req.body;
 
+    console.log('Creating user with data:', { full_name, email, role, pin: '****', active });
+
     if (!full_name || !email || !role || !pin) {
       return res.status(400).json({ error: 'Full name, email, role, and PIN are required' });
     }
@@ -448,8 +498,13 @@ router.post('/users', async (req, res) => {
       return res.status(400).json({ error: 'PIN must be exactly 4 digits' });
     }
 
-    // Map frontend role 'ministry' to database role 'ministry_leader'
-    const dbRole = role === 'ministry' ? 'ministry_leader' : role;
+    // Map frontend role to database role
+    let dbRole = role;
+    if (role === 'ministry' || role === 'ministry_leader') {
+      dbRole = 'ministry_leader';
+    }
+
+    console.log('Role mapping:', { frontend: role, database: dbRole });
 
     // Check for duplicate email
     const existing = await pool.query(
@@ -461,12 +516,17 @@ router.post('/users', async (req, res) => {
       return res.status(400).json({ error: 'A user with this email already exists' });
     }
 
+    // Just insert user into users table - NO ministry assignment here
+    // Ministry assignment happens separately in "Manage Ministries"
     const result = await pool.query(
       `INSERT INTO users (name, email, role, pin, active)
        VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, name as full_name, email, CASE WHEN role = 'ministry_leader' THEN 'ministry' ELSE role END as role, active, created_at`,
+       RETURNING id, name as full_name, email, role, active, created_at`,
       [full_name.trim(), email.toLowerCase().trim(), dbRole, pin, active !== false]
     );
+
+    const newUser = result.rows[0];
+    console.log('✅ User created successfully in database:', newUser);
 
     // Log audit
     await pool.query(
@@ -474,7 +534,8 @@ router.post('/users', async (req, res) => {
       [req.user.id, 'user_created', `Created user: ${email}`]
     );
 
-    res.status(201).json(result.rows[0]);
+    console.log('✅ Returning response to frontend:', newUser);
+    res.status(201).json(newUser);
   } catch (error) {
     if (error.code === '23505') {
       return res.status(409).json({ error: 'Email already exists' });
@@ -504,8 +565,11 @@ router.put('/users/:id', async (req, res) => {
       return res.status(400).json({ error: 'A user with this email already exists' });
     }
 
-    // Map frontend role 'ministry' to database role 'ministry_leader'
-    const dbRole = role === 'ministry' ? 'ministry_leader' : role;
+    // Map frontend role to database role
+    let dbRole = role;
+    if (role === 'ministry' || role === 'ministry_leader') {
+      dbRole = 'ministry_leader';
+    }
 
     let query, params;
     if (pin && pin.length === 4 && /^\d{4}$/.test(pin)) {
@@ -513,14 +577,14 @@ router.put('/users/:id', async (req, res) => {
       query = `UPDATE users 
                SET name = $1, email = $2, role = $3, pin = $4, active = $5
                WHERE id = $6
-               RETURNING id, name as full_name, email, CASE WHEN role = 'ministry_leader' THEN 'ministry' ELSE role END as role, active, created_at`;
+               RETURNING id, name as full_name, email, role, active, created_at`;
       params = [full_name.trim(), email.toLowerCase().trim(), dbRole, pin, active !== undefined ? active : true, userId];
     } else {
       // Update without changing PIN
       query = `UPDATE users 
                SET name = $1, email = $2, role = $3, active = $4
                WHERE id = $5
-               RETURNING id, name as full_name, email, CASE WHEN role = 'ministry_leader' THEN 'ministry' ELSE role END as role, active, created_at`;
+               RETURNING id, name as full_name, email, role, active, created_at`;
       params = [full_name.trim(), email.toLowerCase().trim(), dbRole, active !== undefined ? active : true, userId];
     }
 
@@ -536,6 +600,7 @@ router.put('/users/:id', async (req, res) => {
       [req.user.id, 'user_updated', `Updated user: ${email}`]
     );
 
+    console.log('✅ User updated successfully:', result.rows[0]);
     res.json(result.rows[0]);
   } catch (error) {
     if (error.code === '23505') {
@@ -580,40 +645,87 @@ router.put('/users/:id/pin', async (req, res) => {
 
 // DELETE /api/admin/users/:id - Delete user
 router.delete('/users/:id', async (req, res) => {
+  const client = await pool.connect();
+  
   try {
     const userId = parseInt(req.params.id);
 
-    // Check if user created any forms
-    const formsCheck = await pool.query(
-      'SELECT COUNT(*) as count FROM ministry_forms WHERE ministry_leader_id = $1',
+    await client.query('BEGIN');
+
+    // Get user info before deletion
+    const userResult = await client.query(
+      'SELECT id, name as full_name, email FROM users WHERE id = $1',
       [userId]
     );
 
-    if (parseInt(formsCheck.rows[0].count) > 0) {
-      return res.status(400).json({ 
-        error: 'Cannot delete user. They have created forms in the system.' 
-      });
-    }
-
-    const result = await pool.query(
-      'DELETE FROM users WHERE id = $1 RETURNING id, name as full_name',
-      [userId]
-    );
-
-    if (result.rows.length === 0) {
+    if (userResult.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Log audit
-    await pool.query(
-      'INSERT INTO audit_log (user_id, action, details) VALUES ($1, $2, $3)',
-      [req.user.id, 'user_deleted', `Deleted user: ${result.rows[0].full_name}`]
+    const user = userResult.rows[0];
+
+    // Unlink user from ministries (set ministry_leader_id to NULL)
+    const ministriesUpdate = await client.query(
+      'UPDATE ministries SET ministry_leader_id = NULL WHERE ministry_leader_id = $1 RETURNING id, name',
+      [userId]
     );
 
-    res.json({ message: 'User deleted successfully' });
+    // Unlink user from forms (set ministry_leader_id to NULL)
+    const formsUpdate = await client.query(
+      'UPDATE ministry_forms SET ministry_leader_id = NULL WHERE ministry_leader_id = $1 RETURNING id, form_number',
+      [userId]
+    );
+
+    // Unlink user from audit logs (set user_id to NULL to preserve history)
+    const auditUpdate = await client.query(
+      'UPDATE audit_log SET user_id = NULL WHERE user_id = $1 RETURNING id',
+      [userId]
+    );
+
+    // Unlink user from approvals (set user_id to NULL to preserve approval history)
+    const approvalsUpdate = await client.query(
+      'UPDATE approvals SET user_id = NULL WHERE user_id = $1 RETURNING id',
+      [userId]
+    );
+
+    // Delete the user
+    await client.query(
+      'DELETE FROM users WHERE id = $1',
+      [userId]
+    );
+
+    await client.query('COMMIT');
+
+    // Log audit with details
+    const auditDetails = {
+      deleted_user: user.full_name,
+      email: user.email,
+      unlinked_ministries: ministriesUpdate.rows.length,
+      unlinked_forms: formsUpdate.rows.length,
+      unlinked_approvals: approvalsUpdate.rows.length,
+      unlinked_audit_logs: auditUpdate.rows.length
+    };
+
+    await pool.query(
+      'INSERT INTO audit_log (user_id, action, details) VALUES ($1, $2, $3)',
+      [req.user.id, 'user_deleted', JSON.stringify(auditDetails)]
+    );
+
+    res.json({ 
+      message: 'User deleted successfully',
+      unlinked_ministries: ministriesUpdate.rows.length,
+      unlinked_forms: formsUpdate.rows.length,
+      unlinked_approvals: approvalsUpdate.rows.length,
+      unlinked_audit_logs: auditUpdate.rows.length
+    });
+
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('Delete user error:', error);
     res.status(500).json({ error: 'Server error deleting user' });
+  } finally {
+    client.release();
   }
 });
 

@@ -53,6 +53,19 @@ const Dashboard = () => {
 
   useEffect(() => {
     loadData();
+
+    // Reload data when page becomes visible (e.g., after approving/rejecting in another tab or returning to this page)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        loadData();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   const loadData = async () => {
@@ -71,8 +84,27 @@ const Dashboard = () => {
   };
 
   const canEdit = (form) => {
+    // Admin can edit any form at any time
     if (user.role === 'admin') return true;
-    if (user.role === 'ministry_leader' && form.status === 'draft') return true;
+    
+    // Ministry leader can only edit forms from ministries they lead
+    if (user.role === 'ministry_leader') {
+      return form.ministry_leader_id === user.id;
+    }
+    
+    // Pillar can only edit forms from ministries they're assigned to
+    if (user.role === 'pillar') {
+      // Check if pillar is assigned to this ministry
+      if (form.assigned_pillars && Array.isArray(form.assigned_pillars) && form.assigned_pillars.length > 0) {
+        return form.assigned_pillars.includes(user.id);
+      }
+      // If no assigned pillars for the ministry, don't allow editing
+      return false;
+    }
+    
+    // Pastor can edit any form at any time
+    if (user.role === 'pastor') return true;
+    
     return false;
   };
 
@@ -129,32 +161,69 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      {/* Stats Cards - Different layouts for different roles */}
+      <div className={`grid grid-cols-1 md:grid-cols-2 gap-6 ${
+        user.role === 'pillar' 
+          ? 'lg:grid-cols-4' 
+          : user.role === 'pastor'
+          ? 'lg:grid-cols-4 max-w-5xl mx-auto'
+          : user.role === 'ministry_leader'
+          ? 'lg:grid-cols-4'
+          : 'lg:grid-cols-3 max-w-4xl mx-auto'
+      }`}>
         <StatsCard
           icon={FileText}
           label="Total Forms"
           value={stats.total}
           color="bg-blue-500"
         />
-        <StatsCard
-          icon={FileText}
-          label="Drafts"
-          value={stats.draft}
-          color="bg-gray-500"
-        />
-        <StatsCard
-          icon={Clock}
-          label="Pending Approval"
-          value={stats.pending_total}
-          color="bg-yellow-500"
-        />
+        
+        {/* Drafts - Only for ministry_leader and admin */}
+        {(user.role === 'ministry_leader' || user.role === 'admin') && (
+          <StatsCard
+            icon={FileText}
+            label="Drafts"
+            value={stats.draft}
+            color="bg-gray-500"
+          />
+        )}
+        
+        {/* Pending Approval - For pillar (exclusive to pillar approval) */}
+        {user.role === 'pillar' && (
+          <StatsCard
+            icon={Clock}
+            label="Pending Approval"
+            value={stats.pending_pillar || 0}
+            color="bg-yellow-500"
+          />
+        )}
+        
+        {/* Pending Approval - For pastor (pending pastor approval) */}
+        {user.role === 'pastor' && (
+          <StatsCard
+            icon={Clock}
+            label="Pending Approval"
+            value={stats.pending_pastor || 0}
+            color="bg-yellow-500"
+          />
+        )}
+        
         <StatsCard
           icon={CheckCircle}
           label="Approved"
           value={stats.approved}
           color="bg-green-600"
         />
+        
+        {/* Rejected - For pillar, pastor, and ministry_leader */}
+        {(user.role === 'pillar' || user.role === 'pastor' || user.role === 'ministry_leader') && (
+          <StatsCard
+            icon={XCircle}
+            label="Rejected"
+            value={stats.rejected || 0}
+            color="bg-red-600"
+          />
+        )}
       </div>
 
       {/* Forms Table */}

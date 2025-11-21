@@ -47,6 +47,16 @@ export const formsService = {
     return response.data;
   },
 
+  async revokeDecision(id) {
+    const response = await api.post(`/forms/${id}/revoke`);
+    return response.data;
+  },
+
+  async raiseQuery(id, description) {
+    const response = await api.post(`/forms/${id}/query`, { description });
+    return response.data;
+  },
+
   // Events
   async getEvents(formId) {
     const response = await api.get(`/forms/${formId}/events`);
